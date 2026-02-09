@@ -27,22 +27,8 @@ const Jimp = require('jimp');
 const Tesseract = require('tesseract.js');
 let pdf;
 try {
-    const pdfImport = require('pdf-parse');
-    console.log('PDF Import keys:', Object.keys(pdfImport));
-    
-    
-    // Attempt multiple export patterns common in Electron/CommonJS
-    pdf = (typeof pdfImport === 'function') ? pdfImport : 
-          (pdfImport.PDFParse && typeof pdfImport.PDFParse === 'function') ? pdfImport.PDFParse :
-          (pdfImport.default && typeof pdfImport.default === 'function') ? pdfImport.default :
-          (pdfImport.pdf && typeof pdfImport.pdf === 'function') ? pdfImport.pdf : null;
-          
-    if (!pdf && typeof pdfImport === 'object') {
-        const keys = Object.keys(pdfImport);
-        console.log('PDF keys found:', keys);
-    }
-
-    console.log('PDF library loaded');
+    pdf = require('pdf-parse');
+    console.log('PDF library loaded successfully');
 } catch (e) {
     console.error('Failed to load pdf-parse:', e);
 }
@@ -121,6 +107,8 @@ ipcMain.handle('set-focusable', (event, focusable) => {
 
 ipcMain.handle('release-focus', () => {
     if (mainWindow) {
+        if (!isAppFocusable && !mainWindow.isFocused()) return;
+        
         isAppFocusable = false;
         mainWindow.setFocusable(false);
         mainWindow.blur();
@@ -138,7 +126,8 @@ ipcMain.handle('set-ignore-mouse-events', (event, ignore, options) => {
 ipcMain.handle('ai-generate-response', async (event, { systemPrompt, chatHistory, maxTokens }) => {
     try {
         const groqApiKeys = store.get('groq-api-key') || '';
-        const keysToTry = groqApiKeys.split(',').map(k => k.trim()).filter(k => k.length > 0);
+        // Support both newline (\n, \r\n) and comma separated keys
+        const keysToTry = groqApiKeys.split(/[\n,\r]+/).map(k => k.trim()).filter(k => k.length > 0);
 
         if (keysToTry.length === 0) {
             throw new Error('No API Keys configured in backend.');
@@ -238,8 +227,11 @@ ipcMain.handle('ai-generate-response', async (event, { systemPrompt, chatHistory
 ipcMain.handle('transcribe-audio', async (event, { audioBuffer, model }) => {
     try {
         const groqApiKeys = store.get('groq-api-key') || '';
-        const keysToTry = groqApiKeys.split(',').map(k => k.trim()).filter(k => k.length > 0);
-        const whisperKey = keysToTry.find(k => !k.startsWith('hf_') && !k.startsWith('AIza'));
+        const keysToTry = groqApiKeys.split(/[\n,\r]+/).map(k => k.trim()).filter(k => k.length > 0);
+        // Prioritize keys starting with gsk_ (Groq) for transcription
+        let whisperKey = keysToTry.find(k => k.startsWith('gsk_'));
+        // Fallback to first non-HF/Gemini key if no gsk_ prefix found
+        if (!whisperKey) whisperKey = keysToTry.find(k => !k.startsWith('hf_') && !k.startsWith('AIza'));
 
         if (!whisperKey) {
             throw new Error('No Groq API Key available for transcription.');
@@ -330,6 +322,82 @@ ipcMain.handle('copy-to-clipboard', (event, text) => {
     const { clipboard } = require('electron');
     clipboard.writeText(text);
     return true;
+});
+
+ipcMain.handle('get-app-version', () => {
+    return app.getVersion();
+});
+
+ipcMain.handle('open-external', async (event, url) => {
+    const { shell } = require('electron');
+    await shell.openExternal(url);
+});
+
+ipcMain.handle('check-for-updates', async () => {
+    try {
+        const response = await net.fetch('https://ghostall.netlify.app/version.json');
+        if (!response.ok) throw new Error('Failed to fetch version info');
+        const remoteData = await response.json();
+        return { success: true, ...remoteData };
+    } catch (err) {
+        console.error('Update Check Error:', err);
+        return { success: false, error: err.message };
+    }
+});
+
+ipcMain.handle('apply-update', async (event, url) => {
+    try {
+        const AdmZip = require('adm-zip');
+        const os = require('os');
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ghost-update-'));
+        const zipPath = path.join(tempDir, 'update.zip');
+
+        console.log('Downloading update from:', url);
+        const response = await net.fetch(url);
+        if (!response.ok) throw new Error(`Download failed: ${response.statusText}`);
+
+        const buffer = await response.arrayBuffer();
+        fs.writeFileSync(zipPath, Buffer.from(buffer));
+
+        console.log('Extracting update...');
+        const zip = new AdmZip(zipPath);
+        const extractPath = path.join(tempDir, 'extracted');
+        zip.extractAllTo(extractPath, true);
+
+        // Prepare the swap script (Windows Batch)
+        const appDir = path.dirname(app.getPath('exe'));
+        const exeName = path.basename(app.getPath('exe'));
+        const scriptPath = path.join(tempDir, 'update.bat');
+
+        // This script will:
+        // 1. Wait 2 seconds for Ghost to close
+        // 2. Clear out the app directory (carefully)
+        // 3. Move extracted files to the app directory
+        // 4. Start the new version
+        // 5. Delete itself
+        const scriptContent = `
+@echo off
+timeout /t 2 /nobreak > nul
+xcopy /E /Y /H /R "${extractPath}\\*" "${appDir}\\"
+start "" "${path.join(appDir, exeName)}"
+del "%~f0"
+`;
+        fs.writeFileSync(scriptPath, scriptContent);
+
+        console.log('Update ready. Closing for swap...');
+        const { spawn } = require('child_process');
+        spawn('cmd.exe', ['/c', scriptPath], {
+            detached: true,
+            stdio: 'ignore'
+        }).unref();
+
+        app.isQuitting = true;
+        app.quit();
+        return { success: true };
+    } catch (error) {
+        console.error('Update Application Error:', error);
+        return { success: false, error: error.message };
+    }
 });
 
 // ============================================================================
@@ -459,24 +527,16 @@ ipcMain.handle('parse-resume-file', async (event, filePath) => {
         const ext = path.extname(filePath).toLowerCase();
 
         if (ext === '.pdf') {
-            console.log('PDF parsing started. pdf type:', typeof pdf);
+            console.log('PDF parsing started...');
             if (typeof pdf !== 'function') {
-                throw new Error("PDF parser not correctly initialized. Found: " + typeof pdf);
+                throw new Error("PDF parser not available.");
             }
-            let data;
-            try {
-                // Try calling as a regular function (standard pdf-parse)
-                data = await pdf(fileBuffer);
-            } catch (err) {
-                if (err.message.includes("Class constructor") || err.message.includes("without 'new'")) {
-                    console.log("PDF parser requires 'new' keyword. Retrying...");
-                    data = await (new pdf(fileBuffer));
-                } else {
-                    throw err;
-                }
+            const data = await pdf(fileBuffer);
+            if (!data || !data.text || data.text.trim().length === 0) {
+                throw new Error("No text found in PDF. It might be an image-only (scanned) PDF.");
             }
-            console.log('PDF Parsed Successfully! Sample:', data.text ? data.text.substring(0, 100) : "No text found");
-            return data.text || "No text extracted from PDF.";
+            console.log('PDF Parsed! Text length:', data.text.length);
+            return data.text;
         } else if (ext === '.docx') {
             const data = await mammoth.extractRawText({ buffer: fileBuffer });
             return data.value;

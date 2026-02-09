@@ -1,6 +1,6 @@
 {
   "name": "ghost",
-  "version": "1.0.1",
+  "version": "1.0.3",
   "description": "A note-taking app that stays invisible during screen sharing",
   "main": "main.js",
   "scripts": {

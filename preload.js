@@ -36,6 +36,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // Clipboard (Stealth Copy)
     copyToClipboard: (text) => ipcRenderer.invoke('copy-to-clipboard', text),
     
-    // Version Info
-    getVersion: () => process.versions.electron
+    // Version Info & Updates
+    getVersion: () => process.versions.electron,
+    getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+    checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
+    applyUpdate: (url) => ipcRenderer.invoke('apply-update', url),
+    openExternal: (url) => ipcRenderer.invoke('open-external', url)
 });

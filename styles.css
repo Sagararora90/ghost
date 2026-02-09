@@ -236,7 +236,7 @@ html, body {
     top: 0;
     right: -25px; /* Position outside the bubble */
     opacity: 0;
-    cursor: pointer;
+    cursor: default !important;
     font-size: 14px;
     padding: 2px 4px;
     transition: opacity 0.2s;
@@ -267,7 +267,7 @@ html, body {
     white-space: pre-wrap;
     user-select: text !important;
     -webkit-user-select: text !important;
-    cursor: text !important;
+    cursor: default !important;
     pointer-events: auto !important;
 }
 
@@ -423,7 +423,7 @@ textarea {
     transition: all 0.2s;
     font-size: 13px;
     line-height: 1.4;
-    cursor: pointer !important;
+    cursor: default !important;
     user-select: none !important;
     pointer-events: auto !important;
 }
@@ -447,7 +447,7 @@ textarea {
 
 .btn-primary { background: white; color: black; }
 .btn-primary:hover:not(:disabled) { background: var(--accent-blue); color: white; }
-.btn-primary:disabled { opacity: 0.3; cursor: not-allowed; }
+.btn-primary:disabled { opacity: 0.3; cursor: default; }
 
 .btn-secondary { background: rgba(255, 255, 255, 0.1); color: white; }
 .btn-secondary:hover { background: rgba(255, 255, 255, 0.2); }
@@ -641,7 +641,7 @@ textarea {
 }
 
 .file-chip .remove-file {
-    cursor: pointer;
+    cursor: default !important;
     color: var(--text-muted);
     font-weight: bold;
     font-size: 14px;
