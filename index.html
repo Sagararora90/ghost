@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' https://api.groq.com https://api-inference.huggingface.co https://router.huggingface.co https://generativelanguage.googleapis.com; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'">
+    <title>Ghost AI</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left" id="robotIconContainer">
+                <span class="icon">🤖</span>
+                <h1>Invisible AI</h1>
+            </div>
+            <div class="header-right">
+                <span id="focusCounter" class="focus-counter">Focus: 0</span>
+                <span id="ghostStatus" class="ghost-status">👻</span>
+                <span id="ttsBtn" class="icon-button" style="outline: none;" onmousedown="return false;" tabindex="-1" onfocus="this.blur()">🎧</span>
+                <span id="screenGrabBtn" class="icon-button" style="outline: none;" onmousedown="return false;" tabindex="-1" onfocus="this.blur()">📸</span>
+                <span id="settingsBtn" class="icon-button" style="outline: none;" onmousedown="return false;" tabindex="-1" onfocus="this.blur()">⚙️</span>
+            </div>
+        </header>
+        <div id="tickerBar" class="ticker-bar hidden"></div>
+
+        <!-- Settings Modal -->
+        <div id="settingsModal" class="modal-overlay hidden">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Settings</h2>
+                    <span id="closeSettings" class="close-btn" onmousedown="return false;" tabindex="-1" onfocus="this.blur()">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="groqKeyInput">API Keys (Groq, HF, Gemini):</label>
+                        <textarea id="groqKeyInput" placeholder="gsk_... (Groq)&#10;hf_... (HuggingFace)&#10;AIza... (Gemini)" spellcheck="false" rows="3" style="font-family: monospace;"></textarea>
+                        <p class="help-text">Add multiple keys! App auto-switches between Groq, HF (Llama/Mistral), and Gemini.</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="userBioInput">About Me / Resume Context:</label>
+                        <div class="upload-section">
+                            <span id="uploadResumeBtn" class="btn-secondary btn-sm" onmousedown="return false;" tabindex="-1" onfocus="this.blur()">📎 Upload Resume (PDF, Word, Image)</span>
+                            <span id="uploadStatus" class="status-text italic hidden">Parsing...</span>
+                        </div>
+                        <div id="resumeFileList" class="file-list"></div>
+                        <textarea id="userBioInput" placeholder="Paste your resume or tell AI about yourself so it can answer personal interview questions for you..." rows="4"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="userJdInput">Job Description (Target Role):</label>
+                        <div class="upload-section">
+                            <span id="uploadJdBtn" class="btn-secondary btn-sm" onmousedown="return false;" tabindex="-1" onfocus="this.blur()">📎 Upload JD (PDF, Word, Image)</span>
+                            <span id="jdUploadStatus" class="status-text italic hidden">Parsing...</span>
+                        </div>
+                        <div id="jdFileList" class="file-list"></div>
+                        <textarea id="userJdInput" placeholder="Paste the Job Description for the role you are interviewing for..." rows="4"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="userProjectsInput">Project Code / Technical Context:</label>
+                        <div class="upload-section">
+                            <span id="uploadProjectFolderBtn" class="btn-secondary btn-sm" onmousedown="return false;" tabindex="-1" onfocus="this.blur()">📁 Upload Project Folder</span>
+                            <span id="uploadProjectBtn" class="btn-secondary btn-sm" onmousedown="return false;" tabindex="-1" onfocus="this.blur()">📦 Upload ZIP</span>
+                            <span id="projectUploadStatus" class="status-text italic hidden">Parsing...</span>
+                        </div>
+                        <div id="projectFileList" class="file-list"></div>
+                        <textarea id="userProjectsInput" placeholder="Paste snippets of your project's code, architecture descriptions, or complex logic here. OR upload a ZIP file above." rows="6"></textarea>
+                    </div>
+                    <div class="modal-footer">
+                        <span id="wipeAllData" class="btn-danger btn-sm" style="margin-right: auto;" onmousedown="return false;" tabindex="-1" onfocus="this.blur()">Delete All Local Data (Reset)</span>
+                        <span id="saveSettings" class="btn-primary" onmousedown="return false;" tabindex="-1" onfocus="this.blur()">Save Settings</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Onboarding Overlay -->
+        <div id="onboardingOverlay" class="modal-overlay hidden">
+            <div class="modal-content">
+                <h2>Welcome to Invisible Notes</h2>
+                <p>To get started, please enter your Groq API Key.</p>
+                <input type="password" id="onboardingKeyInput" placeholder="Enter gsk_..." spellcheck="false">
+                <span id="finishOnboarding" class="btn-primary" onmousedown="return false;" tabindex="-1" onfocus="this.blur()">Finish Setup</span>
+                <p class="help-text">Your key is stored locally on your machine.</p>
+            </div>
+        </div>
+        <div id="listeningIndicator" class="listening-indicator">Listening Meeting...</div>
+
+        <!-- OCR Selection Overlay (Hidden by default) -->
+        <div id="ocrOverlay" class="ocr-overlay hidden">
+            <div class="ocr-content">
+                <h3>Select text to send:</h3>
+                <div id="ocrLines" class="ocr-lines">
+                    <!-- Extracted lines will appear here -->
+                </div>
+                <div class="ocr-actions">
+                    <span id="cancelOcr" class="btn-secondary" style="outline: none;" onmousedown="return false;" tabindex="-1" onfocus="this.blur()">Cancel</span>
+                    <span id="sendOcr" class="btn-primary" style="outline: none; opacity: 0.5; pointer-events: none;" onmousedown="return false;" tabindex="-1" onfocus="this.blur()">Add to Chat</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Chat Messages Area -->
+        <main id="chatContainer" class="chat-container">
+            <div id="messages" class="messages-list">
+                <!-- Messages will appear here -->
+                <div class="message system">
+                    <div class="bubble">
+                        Hello! I'm your Invisible AI assistant. How can I help you today?
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Input Area -->
+        <footer class="input-section">
+            <div class="input-wrapper">
+                <textarea 
+                    id="messageInput" 
+                    placeholder="Ask me anything... (Enter to send, Shift+Enter for new line)" 
+                    rows="1"
+                ></textarea>
+                <span id="sendButton" class="send-button" onmousedown="return false;" tabindex="-1" onfocus="this.blur()">
+                    <span class="send-icon" onmousedown="return false;" tabindex="-1" onfocus="this.blur()">↗️</span>
+                </span>
+            </div>
+            <div class="footer-info">
+                <span class="tip">💡 Ctrl+Shift+N to hide/show</span>
+                <span class="status-indicator">
+                    <span class="status-icon">👁️‍🗨️</span>
+                    <span class="status-text">Protected</span>
+                </span>
+            </div>
+        </footer>
+    </div>
+
+    <script src="renderer.js"></script>
+</body>
+</html>
