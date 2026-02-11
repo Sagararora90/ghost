@@ -362,6 +362,18 @@ function setupEventListeners() {
                 hideOcrOverlay();
             }
             
+            // Manual Update Check
+            const checkUpdatesBtn = e.target.closest('#checkForUpdatesBtn');
+            if (checkUpdatesBtn) {
+                checkUpdatesBtn.textContent = "Checking...";
+                checkUpdatesBtn.disabled = true;
+                checkForAppUpdates(true); // Pass true to show alerts
+                setTimeout(() => {
+                    checkUpdatesBtn.textContent = "Check for Updates";
+                    checkUpdatesBtn.disabled = false;
+                }, 3000);
+            }
+
             return;
         }
 
@@ -949,10 +961,7 @@ async function startAudioCapture() {
             audio: {
                 mandatory: {
                     chromeMediaSource: 'desktop',
-                    chromeMediaSourceId: sourceId,
-                    echoCancellation: false,
-                    noiseSuppression: false,
-                    autoGainControl: false
+                    chromeMediaSourceId: sourceId
                 }
             },
             video: {
@@ -1063,12 +1072,13 @@ async function processAudioChunk(blob) {
     }
 }
 
-async function checkForAppUpdates() {
+async function checkForAppUpdates(showFeedback = false) {
     try {
         const currentVersion = await window.electronAPI.getAppVersion();
         const updateInfo = await window.electronAPI.checkForUpdates();
         
-        if (updateInfo.success && updateInfo.version !== currentVersion) {
+        if (updateInfo.success) {
+            if (updateInfo.version !== currentVersion) {
             console.log(`Update available: ${updateInfo.version} (Current: ${currentVersion})`);
             
             // Inject a subtle system message into the chat
@@ -1110,9 +1120,15 @@ async function checkForAppUpdates() {
                     }
                 });
             }
+            } else if (showFeedback) {
+                alert(`You are on the latest version (v${currentVersion}).`);
+            }
+        } else if (showFeedback) {
+            alert(`Update check failed: ${updateInfo.error}`);
         }
     } catch (err) {
         console.warn('Silent Update Check failed (Likely offline):', err);
+        if (showFeedback) alert('Update check failed (Offline?)');
     }
 }
 

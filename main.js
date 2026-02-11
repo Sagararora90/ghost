@@ -301,7 +301,23 @@ ipcMain.handle('perform-ocr', async (event, base64Image) => {
         const image = await Jimp.read(buffer);
         image.grayscale().contrast(0.2).scale(2).normalize();
         const processedBuffer = await image.getBufferAsync(Jimp.MIME_PNG);
-        const { data: { text } } = await Tesseract.recognize(processedBuffer, 'eng');
+        
+        // FIX: Explicitly Configure Tesseract Paths for Electron
+        const workerPath = app.isPackaged 
+            ? path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'tesseract.js', 'src', 'worker-script', 'node', 'index.js')
+            : path.join(__dirname, 'node_modules', 'tesseract.js', 'src', 'worker-script', 'node', 'index.js');
+        
+        const corePath = app.isPackaged
+            ? path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'tesseract.js-core', 'tesseract-core.wasm.js')
+            : path.join(__dirname, 'node_modules', 'tesseract.js-core', 'tesseract-core.wasm.js');
+
+        // Note: Tesseract.recognize(image, lang, options)
+        const { data: { text } } = await Tesseract.recognize(processedBuffer, 'eng', {
+            langPath: app.isPackaged ? process.resourcesPath : __dirname,
+            gzip: false
+            // workerPath: workerPath, // Attempting default first, if fail we might need this
+            // corePath: corePath 
+        });
         return text.split('\n').map(line => line.trim()).filter(line => line.length > 3);
     } catch (err) {
         console.error('OCR Error:', err);

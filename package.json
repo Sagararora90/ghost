@@ -1,6 +1,6 @@
 {
   "name": "ghost",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "A note-taking app that stays invisible during screen sharing",
   "main": "main.js",
   "scripts": {
@@ -30,6 +30,7 @@
     "productName": "Ghost",
     "win": {
       "target": "zip",
+      "artifactName": "Ghost_Portable.zip",
       "icon": "assets/icon.png"
     },
     "nsis": {
@@ -37,6 +38,7 @@
       "allowToChangeInstallationDirectory": true
     },
     "files": [
+      "**/*",
       "!dist",
       "!dist/**/*",
       "!landing-page",
@@ -46,7 +48,16 @@
       "!**/*.ts", 
       "!.gitignore", 
       "!README.md",
-      "**/*"
+      "!*.zip",
+      "!deployment.zip",
+      "!build_as_admin.bat"
+    ],
+    "extraResources": [
+      "eng.traineddata"
+    ],
+    "asarUnpack": [
+      "**/node_modules/tesseract.js-core/**",
+      "**/node_modules/tesseract.js/**"
     ]
   }
 }
