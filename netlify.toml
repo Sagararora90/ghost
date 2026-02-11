@@ -1,4 +1,4 @@
 [build]
   publish = "landing-page"
-  command = "# no build command"
+  command = "echo 'Deploying Ghost AI Landing Page...'"
 
