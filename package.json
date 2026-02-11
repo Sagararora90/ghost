@@ -29,7 +29,7 @@
     "appId": "com.ghost.sh",
     "productName": "Ghost",
     "win": {
-      "target": ["nsis", "portable"],
+      "target": "zip",
       "icon": "assets/icon.png"
     },
     "nsis": {
