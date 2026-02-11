@@ -338,6 +338,8 @@ ipcMain.handle('check-for-updates', async () => {
         const response = await net.fetch('https://ghostall.vercel.app/update.json');
         if (!response.ok) throw new Error('Failed to fetch version info');
         const remoteData = await response.json();
+        const currentVersion = app.getVersion();
+        console.log(`Update Check: Local=${currentVersion}, Remote=${remoteData.version}`);
         return { success: true, ...remoteData };
     } catch (err) {
         console.error('Update Check Error:', err);
@@ -534,7 +536,9 @@ ipcMain.handle('parse-resume-file', async (event, filePath) => {
                 throw new Error("PDF parser not available in current environment.");
             }
             const data = await pdf(fileBuffer);
+            console.log('PDF Raw Data received:', !!data);
             if (!data || !data.text || data.text.trim().length === 0) {
+                console.warn('PDF Parsing warning: No text content found.');
                 throw new Error("No text found in PDF. It might be an image-only (scanned) PDF. Please use OCR or a text-based version.");
             }
             console.log(`PDF Parsed successfully. Extracted ${data.text.length} characters.`);
@@ -596,7 +600,7 @@ function createWindow() {
             nodeIntegration: false,
             contextIsolation: true,
             preload: path.join(__dirname, 'preload.js'),
-            devTools: false // Set to false for production
+            devTools: true // Enabled temporarily for debugging
         },
         focusable: false,
         showInactive: true,

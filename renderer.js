@@ -435,17 +435,20 @@ async function handleResumeUpload() {
         status.textContent = "Parsing " + fileName + "...";
         
         try {
+            console.log('Requesting parsing for:', filePath);
             const text = await window.electronAPI.parseResumeFile(filePath);
+            console.log('Parse result received. Length:', text ? text.trim().length : 0);
             if (text && text.trim().length > 0) {
                 storedResumes.push({ name: fileName, content: text }); 
                 await window.electronAPI.setSetting('stored-resumes', storedResumes);
                 renderFileLists();
                 status.textContent = "Done!";
             } else {
+                console.warn('Empty text returned from parse.');
                 throw new Error("No text content extracted.");
             }
         } catch (err) {
-            console.error('Resume parse error:', err);
+            console.error('Resume parse error (UI):', err);
             status.textContent = "Error: " + (err.message || "Failed to parse");
             status.style.color = "#ff4b4b";
         }
