@@ -333,9 +333,7 @@ ipcMain.handle('open-external', async (event, url) => {
     await shell.openExternal(url);
 });
 
-ipcMain.handle('get-app-version', () => {
-    return app.getVersion();
-});
+
 
 ipcMain.handle('check-for-updates', async () => {
     try {
@@ -360,7 +358,7 @@ ipcMain.handle('apply-update', async (event, url) => {
 
         console.log('Downloading update from:', url);
         const response = await net.fetch(url);
-        if (!response.ok) throw new Error(`Download failed: ${response.statusText}`);
+        if (!response.ok) throw new Error(`Download failed: ${response.status} ${response.statusText}`);
 
         const buffer = await response.arrayBuffer();
         fs.writeFileSync(zipPath, Buffer.from(buffer));
