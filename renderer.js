@@ -1104,7 +1104,6 @@ async function checkForAppUpdates() {
                     }
                 });
             }
-            }
         }
     } catch (err) {
         console.warn('Silent Update Check failed (Likely offline):', err);
