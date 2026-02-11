@@ -1,4 +1,0 @@
-[build]
-  publish = "landing-page"
-  command = "echo 'Deploying Ghost AI Landing Page...'"
-

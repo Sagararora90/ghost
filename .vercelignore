@@ -1,0 +1,24 @@
+# Ignore large zip file
+landing-page/Ghost_Portable.zip
+
+# Ignore source code and dev files
+*.js
+!landing-page/main.js
+package.json
+.git
+.gitignore
+.gitattributes
+node_modules
+README.md
+eng.traineddata
+assets/
+icon.png
+styles.css
+*.toml
+*.zip
+!landing-page/Ghost_Portable.zip
+# Actually, it's better to ignore the zip entirely in the ignore file 
+# and let the user host it on GitHub
+landing-page/Ghost_Portable.zip
+Ghost_Portable.zip
+deployment.zip
