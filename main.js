@@ -335,7 +335,7 @@ ipcMain.handle('open-external', async (event, url) => {
 
 ipcMain.handle('check-for-updates', async () => {
     try {
-        const response = await net.fetch('https://ghostall.netlify.app/version.json');
+        const response = await net.fetch('https://ghostall.netlify.app/update.json');
         if (!response.ok) throw new Error('Failed to fetch version info');
         const remoteData = await response.json();
         return { success: true, ...remoteData };
