@@ -360,8 +360,16 @@ ipcMain.handle('perform-ocr', async (event, base64Image) => {
         return text.split('\n').map(line => line.trim()).filter(line => line.length > 3);
     } catch (err) {
         console.error('OCR Error:', err);
-        // Return full error details including paths to help debugging
-        return [`Error: ${err.message}`, `Checked Lang Path: ${isProd ? process.resourcesPath : __dirname}`];
+        
+        const isProd = app.isPackaged;
+        const debugInfo = `Error: ${err.message}\n` +
+            `Worker: ${isProd ? path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'tesseract.js', 'dist', 'worker.min.js') : 'Local'}\n` +
+            `Core: ${isProd ? path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'tesseract.js-core', 'tesseract-core.wasm.js') : 'Local'}\n` +
+            `Lang Path: ${isProd ? process.resourcesPath : __dirname}`;
+
+        dialog.showErrorBox("OCR Critical Failure", debugInfo);
+
+        return [`Error: ${err.message}`, "Please verify paths shown in popup."];
     }
 });
 
