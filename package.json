@@ -54,7 +54,7 @@
       "!push_error.txt"
     ],
     "extraResources": [
-      "landing-page/eng.traineddata"
+      "eng.traineddata"
     ],
     "asarUnpack": [
       "**/node_modules/tesseract.js-core/**",

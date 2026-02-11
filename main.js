@@ -287,7 +287,9 @@ ipcMain.handle('capture-screen', async () => {
     } finally {
         // ALWAYS restore window if it was visible
         if (wasVisible && mainWindow) {
-            mainWindow.setSkipTaskbar(false);
+            // RELEASE STEALTH: Do NOT show in taskbar
+            // mainWindow.setSkipTaskbar(false); <--- REMOVED to keep it invisible from taskbar
+            mainWindow.setSkipTaskbar(true); // Force hidden from taskbar
             mainWindow.show(); 
             mainWindow.setFocusable(true);
             mainWindow.setAlwaysOnTop(true, "screen-saver", 1);
@@ -320,12 +322,32 @@ ipcMain.handle('perform-ocr', async (event, base64Image) => {
             ? path.join(resources, 'app.asar.unpacked', 'node_modules', 'tesseract.js-core', 'tesseract-core.wasm.js')
             : path.join(__dirname, 'node_modules', 'tesseract.js-core', 'tesseract-core.wasm.js');
 
-        const langPath = isProd ? resources : __dirname;
+        // ROBUST LANG PATH DETECTION
+        let langPath = resources;
+        
+        // In production, extraResources copies 'eng.traineddata' to resources root
+        // So checking 'resources' is usually enough.
+        // We also check a few other common locations just in case.
+        if (isProd) {
+             const potentialPaths = [
+                resources,
+                path.join(resources, 'landing-page'), 
+                path.join(resources, 'app.asar.unpacked')
+             ];
+             for (const p of potentialPaths) {
+                 if (fs.existsSync(path.join(p, 'eng.traineddata'))) {
+                     langPath = p;
+                     break;
+                 }
+             }
+        } else {
+             langPath = __dirname;
+        }
 
         console.log(`OCR Paths:
         Worker: ${workerPath}
         Core: ${corePath}
-        Lang: ${langPath}`);
+        Lang Path: ${langPath}`);
 
         const { data: { text } } = await Tesseract.recognize(processedBuffer, 'eng', {
             workerPath,
@@ -339,7 +361,7 @@ ipcMain.handle('perform-ocr', async (event, base64Image) => {
     } catch (err) {
         console.error('OCR Error:', err);
         // Return full error details including paths to help debugging
-        return [`Error: ${err.message}`, `Worker: ${path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'tesseract.js', 'dist', 'worker.min.js')}`];
+        return [`Error: ${err.message}`, `Checked Lang Path: ${isProd ? process.resourcesPath : __dirname}`];
     }
 });
 
