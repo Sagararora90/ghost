@@ -1083,17 +1083,18 @@ async function checkForAppUpdates() {
             messagesList.appendChild(updateMessage);
             scrollToBottom();
             
-            const applyBtn = updateMessage.querySelector('#applyUpdateBtn');
-            const statusDiv = updateMessage.querySelector('#updateStatus');
-            
             if (applyBtn) {
+                const isPatch = !!updateInfo.patch_url;
+                const downloadUrl = updateInfo.patch_url || updateInfo.url;
+                
                 applyBtn.addEventListener('click', async () => {
                     applyBtn.disabled = true;
                     applyBtn.style.opacity = '0.5';
-                    applyBtn.innerText = 'Downloading...';
+                    applyBtn.innerText = isPatch ? 'Applying Hotfix...' : 'Downloading Core Update...';
+                    statusDiv.innerText = isPatch ? 'Downloading small patch (~50KB)...' : 'Downloading full engine (~300MB)...';
                     statusDiv.style.display = 'block';
                     
-                    const result = await window.electronAPI.applyUpdate(updateInfo.url);
+                    const result = await window.electronAPI.applyUpdate(downloadUrl);
                     if (!result.success) {
                         applyBtn.disabled = false;
                         applyBtn.style.opacity = '1';
@@ -1102,6 +1103,7 @@ async function checkForAppUpdates() {
                         statusDiv.style.color = '#ff4b4b';
                     }
                 });
+            }
             }
         }
     } catch (err) {

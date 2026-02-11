@@ -1,4 +1,5 @@
 {
   "version": "1.0.4",
-  "url": "https://github.com/Sagararora90/ghost/releases/download/v1.0.4/Ghost_Portable.zip"
+  "url": "https://github.com/Sagararora90/ghost/releases/download/v1.0.4/Ghost_Portable.zip",
+  "patch_url": ""
 }
