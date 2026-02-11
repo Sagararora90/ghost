@@ -272,14 +272,21 @@ ipcMain.handle('transcribe-audio', async (event, { audioBuffer, model }) => {
 });
 
 ipcMain.handle('capture-screen', async () => {
+    let wasVisible = false;
     try {
-        const wasVisible = mainWindow.isVisible();
+        wasVisible = mainWindow.isVisible();
         if (wasVisible) {
             mainWindow.hide();
             await new Promise(resolve => setTimeout(resolve, 150));
         }
         const img = await screenshot({ format: 'png' });
-        if (wasVisible) {
+        return img.toString('base64');
+    } catch (err) {
+        console.error('Capture Error:', err);
+        return null;
+    } finally {
+        // ALWAYS restore window if it was visible
+        if (wasVisible && mainWindow) {
             mainWindow.setSkipTaskbar(false);
             mainWindow.show(); 
             mainWindow.setFocusable(true);
@@ -290,10 +297,6 @@ ipcMain.handle('capture-screen', async () => {
                 mainWindow.setFocusable(false);
             }, 100);
         }
-        return img.toString('base64');
-    } catch (err) {
-        console.error('Capture Error:', err);
-        return null;
     }
 });
 
