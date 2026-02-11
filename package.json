@@ -1,6 +1,6 @@
 {
   "name": "ghost",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "A note-taking app that stays invisible during screen sharing",
   "main": "main.js",
   "scripts": {
@@ -20,7 +20,7 @@
     "electron-store": "^8.1.0",
     "jimp": "^0.16.1",
     "mammoth": "^1.11.0",
-    "pdf-parse": "^2.4.5",
+    "pdf-parse": "^1.1.1",
     "screenshot-desktop": "^1.15.3",
     "tesseract.js": "^7.0.0",
     "uiohook-napi": "^1.5.4"
@@ -39,18 +39,19 @@
     },
     "files": [
       "**/*",
-      "!dist",
-      "!dist/**/*",
-      "!landing-page",
-      "!landing-page/**/*",
-      "!**/.git/*",
+      "!dist/**",
+      "!landing-page/**",
+      "!deployment/**",
+      "!**/.git/**",
       "!**/*.map",
-      "!**/*.ts", 
-      "!.gitignore", 
+      "!**/*.ts",
+      "!.gitignore",
       "!README.md",
       "!*.zip",
       "!deployment.zip",
-      "!build_as_admin.bat"
+      "!build_as_admin.bat",
+      "!large_files.txt",
+      "!push_error.txt"
     ],
     "extraResources": [
       "eng.traineddata"

@@ -280,12 +280,15 @@ ipcMain.handle('capture-screen', async () => {
         }
         const img = await screenshot({ format: 'png' });
         if (wasVisible) {
-            isAppFocusable = false;
-            mainWindow.setFocusable(false);
-            mainWindow.showInactive();
-            mainWindow.setSkipTaskbar(true);
+            mainWindow.setSkipTaskbar(false);
+            mainWindow.show(); 
+            mainWindow.setFocusable(true);
             mainWindow.setAlwaysOnTop(true, "screen-saver", 1);
-            mainWindow.blur();
+            // Small delay before returning focus properties to stealth
+            setTimeout(() => {
+                isAppFocusable = false;
+                mainWindow.setFocusable(false);
+            }, 100);
         }
         return img.toString('base64');
     } catch (err) {
@@ -302,26 +305,29 @@ ipcMain.handle('perform-ocr', async (event, base64Image) => {
         image.grayscale().contrast(0.2).scale(2).normalize();
         const processedBuffer = await image.getBufferAsync(Jimp.MIME_PNG);
         
-        // FIX: Explicitly Configure Tesseract Paths for Electron
+        // FIX: Explicitly Configure Tesseract Paths for Electron Production
         const workerPath = app.isPackaged 
-            ? path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'tesseract.js', 'src', 'worker-script', 'node', 'index.js')
-            : path.join(__dirname, 'node_modules', 'tesseract.js', 'src', 'worker-script', 'node', 'index.js');
+            ? path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'tesseract.js', 'dist', 'worker.min.js')
+            : path.join(__dirname, 'node_modules', 'tesseract.js', 'dist', 'worker.min.js');
         
         const corePath = app.isPackaged
             ? path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'tesseract.js-core', 'tesseract-core.wasm.js')
             : path.join(__dirname, 'node_modules', 'tesseract.js-core', 'tesseract-core.wasm.js');
 
-        // Note: Tesseract.recognize(image, lang, options)
+        const langPath = app.isPackaged ? process.resourcesPath : __dirname;
+
         const { data: { text } } = await Tesseract.recognize(processedBuffer, 'eng', {
-            langPath: app.isPackaged ? process.resourcesPath : __dirname,
-            gzip: false
-            // workerPath: workerPath, // Attempting default first, if fail we might need this
-            // corePath: corePath 
+            workerPath,
+            corePath,
+            langPath,
+            gzip: false,
+            cacheMethod: 'none'
         });
         return text.split('\n').map(line => line.trim()).filter(line => line.length > 3);
     } catch (err) {
         console.error('OCR Error:', err);
-        return [];
+        // Return error details to help debugging
+        return [`Error: ${err.message || 'Unknown OCR failure'}`];
     }
 });
 
@@ -379,10 +385,12 @@ ipcMain.handle('apply-update', async (event, url) => {
         const buffer = await response.arrayBuffer();
         fs.writeFileSync(zipPath, Buffer.from(buffer));
 
-        console.log('Extracting update...');
-        const zip = new AdmZip(zipPath);
         const extractPath = path.join(tempDir, 'extracted');
-        zip.extractAllTo(extractPath, true);
+        
+        console.log('Extracting update (Native)...');
+        // Use PowerShell for reliable extraction on Windows (avoids adm-zip permission errors)
+        const { execSync } = require('child_process');
+        execSync(`powershell -Command "Expand-Archive -Path '${zipPath}' -DestinationPath '${extractPath}' -Force"`, { stdio: 'ignore' });
 
         // Prepare the swap script (Windows Batch)
         const appDir = path.dirname(app.getPath('exe'));

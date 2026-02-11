@@ -206,6 +206,12 @@ html, body {
     animation: fadeIn 0.3s;
 }
 
+.listening-indicator.pulse {
+    animation: pulse 1.5s infinite ease-in-out;
+    background: #FF4B4B; /* Change color to red when recording/processing */
+    box-shadow: 0 0 8px #FF4B4B;
+}
+
 /* ===== Chat Container ===== */
 .chat-container {
     flex: 1;

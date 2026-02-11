@@ -26,7 +26,7 @@
             <h1>Crush Technical Interviews <br>with <span style="color: var(--accent-color);">Total Stealth.</span></h1>
             <p>The world's first AI assistant that is completely invisible to screen sharing and proctoring software. Your secret partner in every call.</p>
             <div class="cta-group">
-                <a href="https://github.com/Sagararora90/ghost/releases/download/v1.0.6/Ghost_Portable.zip" class="btn btn-primary" download>
+                <a href="Ghost_Portable.zip" class="btn btn-primary" download>
                     <i class="fab fa-windows"></i> Download for Windows
                 </a>
                 <button class="btn btn-secondary btn-icon" title="Copy Download Link" id="copyBtn">
@@ -151,7 +151,7 @@
 
     <script>
         document.getElementById('copyBtn').addEventListener('click', function() {
-            const url = "https://github.com/Sagararora90/ghost/releases/download/v1.0.6/Ghost_Portable.zip";
+            const url = window.location.origin + "/Ghost_Portable.zip";
             navigator.clipboard.writeText(url).then(() => {
                 const icon = this.querySelector('i');
                 const originalClass = icon.className;

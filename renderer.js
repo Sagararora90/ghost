@@ -213,9 +213,10 @@ function setupEventListeners() {
             if (document.activeElement && document.activeElement !== messageInput) document.activeElement.blur();
             
             // OCR Selection
+            // OCR Selection - Handled in click event now to allow text selection
             if (ocrLine && !ocrBtn && !cancelBtn) {
-                console.log('OCR Line Click Detected:', ocrLine.textContent);
-                toggleOcrLine(ocrLine);
+                // Do NOT prevent default here to allow selection
+                // The toggle logic is moved to a separate click handler
                 return; 
             }
 
@@ -416,6 +417,19 @@ function setupEventListeners() {
         console.log('Mouse left window - enabling click-through (Stealth Mode)');
         window.electronAPI.setIgnoreMouseEvents(true, { forward: true });
     });
+
+    // CLICK HANDLER for OCR Toggling (allows selection)
+    document.addEventListener('click', (e) => {
+        const ocrLine = e.target.closest('.ocr-line');
+        if (ocrLine) {
+            const selection = window.getSelection();
+            if (selection.toString().length > 0) {
+                // User is selecting text, do not toggle
+                return;
+            }
+            toggleOcrLine(ocrLine);
+        }
+    });
 }
 
 // FIX: Added focus counter reset function
@@ -606,7 +620,7 @@ function renderOcrLines(lines) {
         lineDiv.className = 'ocr-line';
         lineDiv.textContent = line;
         lineDiv.dataset.index = index;
-        lineDiv.onmousedown = (e) => e.preventDefault();
+        // lineDiv.onmousedown = (e) => e.preventDefault(); // Removed to allow selection
         lineDiv.setAttribute('tabindex', '-1');
         ocrLinesContainer.appendChild(lineDiv);
     });
@@ -852,7 +866,13 @@ async function toggleMeetingMode() {
     isMeetingMode = !isMeetingMode;
     const robotIcon = document.getElementById('robotIconContainer');
     if (robotIcon) robotIcon.classList.toggle('active', isMeetingMode);
-    listeningIndicator.classList.toggle('active', isMeetingMode);
+    
+    // Enhanced Visual Feedback
+    if (listeningIndicator) {
+        listeningIndicator.classList.toggle('active', isMeetingMode);
+        if (isMeetingMode) listeningIndicator.classList.add('pulse');
+        else listeningIndicator.classList.remove('pulse');
+    }
 
     if (isMeetingMode) {
         startAudioCapture();
@@ -1078,7 +1098,9 @@ async function checkForAppUpdates(showFeedback = false) {
         const updateInfo = await window.electronAPI.checkForUpdates();
         
         if (updateInfo.success) {
-            if (updateInfo.version !== currentVersion) {
+            // Simple version comparison: Only update if remote is newer
+            // (Assuming remote > current string comparison works for simple major.minor.patch)
+            if (updateInfo.version > currentVersion) {
             console.log(`Update available: ${updateInfo.version} (Current: ${currentVersion})`);
             
             // Inject a subtle system message into the chat

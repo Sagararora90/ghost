@@ -1,0 +1,10 @@
+﻿git : To https://github.com/Sagararora90/ghost.git
+At line:1 char:1
++ git push 2>&1 | Out-File -FilePath push_error.txt 
+-Encoding utf8; Get ...
++ ~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (To https:/ 
+   /gith...ora90/ghost.git:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+   e3cacbf..d00e479  main -> main
