@@ -1,5 +1,5 @@
 [build]
-  publish = "."
+  publish = "landing-page"
   command = "# no build command"
 
 [context.production]
