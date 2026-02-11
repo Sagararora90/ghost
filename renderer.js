@@ -430,22 +430,26 @@ async function handleResumeUpload() {
     if (filePath) {
         const status = document.getElementById('uploadStatus');
         status.classList.remove('hidden');
+        status.style.color = '#fff';
         const fileName = filePath.split(/[\\/]/).pop();
         status.textContent = "Parsing " + fileName + "...";
         
         try {
             const text = await window.electronAPI.parseResumeFile(filePath);
-            if (text) {
+            if (text && text.trim().length > 0) {
                 storedResumes.push({ name: fileName, content: text }); 
-                await window.electronAPI.setSetting('stored-resumes', storedResumes); // Auto-save
+                await window.electronAPI.setSetting('stored-resumes', storedResumes);
                 renderFileLists();
                 status.textContent = "Done!";
+            } else {
+                throw new Error("No text content extracted.");
             }
         } catch (err) {
             console.error('Resume parse error:', err);
-            status.textContent = "Error parsing file.";
+            status.textContent = "Error: " + (err.message || "Failed to parse");
+            status.style.color = "#ff4b4b";
         }
-        setTimeout(() => status.classList.add('hidden'), 3000);
+        setTimeout(() => status.classList.add('hidden'), 5000);
     }
 }
 
@@ -454,22 +458,26 @@ async function handleJdUpload() {
     if (filePath) {
         const status = document.getElementById('jdUploadStatus');
         status.classList.remove('hidden');
+        status.style.color = '#fff';
         const fileName = filePath.split(/[\\/]/).pop();
         status.textContent = "Parsing " + fileName + "...";
         
         try {
             const text = await window.electronAPI.parseResumeFile(filePath);
-            if (text) {
+            if (text && text.trim().length > 0) {
                 storedJDs.push({ name: fileName, content: text });
-                await window.electronAPI.setSetting('stored-jds', storedJDs); // Auto-save
+                await window.electronAPI.setSetting('stored-jds', storedJDs);
                 renderFileLists();
                 status.textContent = "Done!";
+            } else {
+                throw new Error("No text content extracted.");
             }
         } catch (err) {
             console.error('JD parse error:', err);
-            status.textContent = "Error parsing file.";
+            status.textContent = "Error: " + (err.message || "Failed to parse");
+            status.style.color = "#ff4b4b";
         }
-        setTimeout(() => status.classList.add('hidden'), 3000);
+        setTimeout(() => status.classList.add('hidden'), 5000);
     }
 }
 
@@ -478,6 +486,7 @@ async function handleProjectUpload() {
     if (filePath) {
         const status = document.getElementById('projectUploadStatus');
         status.classList.remove('hidden');
+        status.style.color = '#fff';
         const fileName = filePath.split(/[\\/]/).pop();
         status.textContent = 'Parsing...';
         
@@ -485,15 +494,16 @@ async function handleProjectUpload() {
             const text = await window.electronAPI.parseProjectZip(filePath);
             if (text) {
                 storedProjects.push({ name: fileName, content: text }); 
-                await window.electronAPI.setSetting('stored-projects', storedProjects); // Auto-save
+                await window.electronAPI.setSetting('stored-projects', storedProjects);
                 renderFileLists();
                 status.textContent = 'Done!';
             }
         } catch (err) {
-            console.error(err);
-            status.textContent = 'Error!';
+            console.error('Project upload error:', err);
+            status.textContent = 'Error: ' + (err.message || "Failed to parse ZIP");
+            status.style.color = "#ff4b4b";
         }
-        setTimeout(() => status.classList.add('hidden'), 3000);
+        setTimeout(() => status.classList.add('hidden'), 5000);
     }
 }
 
@@ -502,6 +512,7 @@ async function handleProjectFolderUpload() {
     if (filePath) {
         const status = document.getElementById('projectUploadStatus');
         status.classList.remove('hidden');
+        status.style.color = '#fff';
         const folderName = filePath.split(/[\\/]/).pop() + "/"; 
         status.textContent = 'Scanning Folder...';
         
@@ -509,15 +520,16 @@ async function handleProjectFolderUpload() {
             const text = await window.electronAPI.parseProjectFolder(filePath);
             if (text) {
                 storedProjects.push({ name: folderName, content: text }); 
-                await window.electronAPI.setSetting('stored-projects', storedProjects); // Auto-save
+                await window.electronAPI.setSetting('stored-projects', storedProjects);
                 renderFileLists();
                 status.textContent = 'Done!';
             }
         } catch (err) {
-            console.error(err);
-            status.textContent = 'Error!';
+            console.error('Folder upload error:', err);
+            status.textContent = 'Error: ' + (err.message || "Failed to parse folder");
+            status.style.color = "#ff4b4b";
         }
-        setTimeout(() => status.classList.add('hidden'), 3000);
+        setTimeout(() => status.classList.add('hidden'), 5000);
     }
 }
 

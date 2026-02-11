@@ -429,10 +429,11 @@ ipcMain.handle('parse-project-zip', async (event, filePath) => {
             }
         }
         
-        return combinedCode || "No supported code files found in ZIP.";
+        if (!combinedCode) throw new Error("No supported code files found in ZIP.");
+        return combinedCode;
     } catch (err) {
-        console.error('ZIP Parsing Error:', err);
-        return "Failed to parse ZIP: " + err.message;
+        console.error('ZIP Parsing IPC Error:', err);
+        throw err;
     }
 });
 
@@ -514,10 +515,11 @@ ipcMain.handle('parse-project-folder', async (event, folderPath) => {
             }
         }
         
-        return combinedCode || "No supported code files found in folder.";
+        if (!combinedCode) throw new Error("No supported code files found in folder.");
+        return combinedCode;
     } catch (err) {
-        console.error('Folder Parsing Error:', err);
-        return "Failed to parse folder: " + err.message;
+        console.error('Folder Parsing IPC Error:', err);
+        throw err;
     }
 });
 
@@ -527,15 +529,15 @@ ipcMain.handle('parse-resume-file', async (event, filePath) => {
         const ext = path.extname(filePath).toLowerCase();
 
         if (ext === '.pdf') {
-            console.log('PDF parsing started...');
+            console.log(`PDF parsing started for: ${filePath}`);
             if (typeof pdf !== 'function') {
-                throw new Error("PDF parser not available.");
+                throw new Error("PDF parser not available in current environment.");
             }
             const data = await pdf(fileBuffer);
             if (!data || !data.text || data.text.trim().length === 0) {
-                throw new Error("No text found in PDF. It might be an image-only (scanned) PDF.");
+                throw new Error("No text found in PDF. It might be an image-only (scanned) PDF. Please use OCR or a text-based version.");
             }
-            console.log('PDF Parsed! Text length:', data.text.length);
+            console.log(`PDF Parsed successfully. Extracted ${data.text.length} characters.`);
             return data.text;
         } else if (ext === '.docx') {
             const data = await mammoth.extractRawText({ buffer: fileBuffer });
@@ -547,10 +549,10 @@ ipcMain.handle('parse-resume-file', async (event, filePath) => {
             const { data: { text } } = await Tesseract.recognize(processedBuffer, 'eng');
             return text;
         }
-        return "Unsupported file format.";
+        throw new Error(`Unsupported file format: ${ext}`);
     } catch (err) {
-        console.error('File Parsing Error:', err);
-        return "Failed to parse file: " + err.message;
+        console.error('File Parsing IPC Error:', err);
+        throw err; // Propagate error to renderer
     }
 });
 
