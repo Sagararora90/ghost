@@ -306,28 +306,37 @@ ipcMain.handle('perform-ocr', async (event, base64Image) => {
         const processedBuffer = await image.getBufferAsync(Jimp.MIME_PNG);
         
         // FIX: Explicitly Configure Tesseract Paths for Electron Production
-        const workerPath = app.isPackaged 
-            ? path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'tesseract.js', 'dist', 'worker.min.js')
+        const isProd = app.isPackaged;
+        const resources = isProd ? process.resourcesPath : __dirname;
+
+        const workerPath = isProd
+            ? path.join(resources, 'app.asar.unpacked', 'node_modules', 'tesseract.js', 'dist', 'worker.min.js')
             : path.join(__dirname, 'node_modules', 'tesseract.js', 'dist', 'worker.min.js');
         
-        const corePath = app.isPackaged
-            ? path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'tesseract.js-core', 'tesseract-core.wasm.js')
+        const corePath = isProd
+            ? path.join(resources, 'app.asar.unpacked', 'node_modules', 'tesseract.js-core', 'tesseract-core.wasm.js')
             : path.join(__dirname, 'node_modules', 'tesseract.js-core', 'tesseract-core.wasm.js');
 
-        const langPath = app.isPackaged ? process.resourcesPath : __dirname;
+        const langPath = isProd ? resources : __dirname;
+
+        console.log(`OCR Paths:
+        Worker: ${workerPath}
+        Core: ${corePath}
+        Lang: ${langPath}`);
 
         const { data: { text } } = await Tesseract.recognize(processedBuffer, 'eng', {
             workerPath,
             corePath,
             langPath,
             gzip: false,
-            cacheMethod: 'none'
+            cacheMethod: 'none',
+            logger: m => console.log(m) // Log progress to main console
         });
         return text.split('\n').map(line => line.trim()).filter(line => line.length > 3);
     } catch (err) {
         console.error('OCR Error:', err);
-        // Return error details to help debugging
-        return [`Error: ${err.message || 'Unknown OCR failure'}`];
+        // Return full error details including paths to help debugging
+        return [`Error: ${err.message}`, `Worker: ${path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'tesseract.js', 'dist', 'worker.min.js')}`];
     }
 });
 
@@ -611,7 +620,7 @@ ipcMain.handle('select-resume-file', async () => {
 
 function createWindow() {
     mainWindow = new BrowserWindow({
-        width: 400,
+        width: 600, // Increased width for better readability
         height: 600,
         resizable: false,
         frame: false,
