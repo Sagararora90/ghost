@@ -1086,6 +1086,9 @@ async function checkForAppUpdates() {
             messagesList.appendChild(updateMessage);
             scrollToBottom();
             
+            const applyBtn = updateMessage.querySelector('#applyUpdateBtn');
+            const statusDiv = updateMessage.querySelector('#updateStatus');
+            
             if (applyBtn) {
                 const isPatch = !!updateInfo.patch_url;
                 const downloadUrl = updateInfo.patch_url || updateInfo.url;

@@ -333,13 +333,17 @@ ipcMain.handle('open-external', async (event, url) => {
     await shell.openExternal(url);
 });
 
+ipcMain.handle('get-app-version', () => {
+    return app.getVersion();
+});
+
 ipcMain.handle('check-for-updates', async () => {
     try {
         const response = await net.fetch('https://ghostall.vercel.app/update.json');
         if (!response.ok) throw new Error('Failed to fetch version info');
         const remoteData = await response.json();
         const currentVersion = app.getVersion();
-        console.log(`Update Check: Local=${currentVersion}, Remote=${remoteData.version}`);
+        console.log(`Update Check -> Local: ${currentVersion}, Remote: ${remoteData.version}`);
         return { success: true, ...remoteData };
     } catch (err) {
         console.error('Update Check Error:', err);
