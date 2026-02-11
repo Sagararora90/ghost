@@ -35,6 +35,18 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
-    }
+    },
+    "files": [
+      "!dist",
+      "!dist/**/*",
+      "!landing-page",
+      "!landing-page/**/*",
+      "!**/.git/*",
+      "!**/*.map",
+      "!**/*.ts", 
+      "!.gitignore", 
+      "!README.md",
+      "**/*"
+    ]
   }
 }
