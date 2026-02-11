@@ -29,8 +29,39 @@
                 <a href="./Ghost_Portable.zip" class="btn btn-primary" download>
                     <i class="fab fa-windows"></i> Download for Windows
                 </a>
+                <button class="btn btn-secondary btn-icon" title="Copy Download Link" id="copyBtn">
+                    <i class="fas fa-link"></i>
+                </button>
                 <a href="#features" class="btn btn-secondary">Explore Features</a>
             </div>
+            <p style="margin-top: 1rem; font-size: 0.9rem; opacity: 0.6;">Current Version: 1.0.3 <span class="tag" style="margin-left: 5px; background: rgba(0, 242, 254, 0.2); color: var(--accent-color); padding: 2px 8px;">STABLE</span></p>
+        </section>
+
+        <section class="whats-new">
+            <h2>What's New in v1.0.3 <span class="tag">LATEST</span></h2>
+            <ul class="changelog">
+                <li>
+                    <i class="fas fa-bolt"></i>
+                    <div>
+                        <strong>One-Click Updates</strong>
+                        <p>Ghost now updates itself silently in the background. No more manual downloads.</p>
+                    </div>
+                </li>
+                <li>
+                    <i class="fas fa-mask"></i>
+                    <div>
+                        <strong>Advanced Stealth</strong>
+                        <p>Enhanced protection against Chromium-based focus detection and browser-level proctoring.</p>
+                    </div>
+                </li>
+                <li>
+                    <i class="fas fa-wand-magic-sparkles"></i>
+                    <div>
+                        <strong>Refined UI</strong>
+                        <p>Smoother overlays and better contrast for high-pressure coding environments.</p>
+                    </div>
+                </li>
+            </ul>
         </section>
 
         <section class="features" id="features">
@@ -117,5 +148,22 @@
             <p>&copy; 2026 Ghost AI. Built for the modern technical candidate.</p>
         </footer>
     </div>
+
+    <script>
+        document.getElementById('copyBtn').addEventListener('click', function() {
+            const url = new URL('./Ghost_Portable.zip', window.location.href).href;
+            navigator.clipboard.writeText(url).then(() => {
+                const icon = this.querySelector('i');
+                const originalClass = icon.className;
+                icon.className = 'fas fa-check';
+                this.style.background = 'rgba(0, 242, 254, 0.2)';
+                
+                setTimeout(() => {
+                    icon.className = originalClass;
+                    this.style.background = '';
+                }, 2000);
+            });
+        });
+    </script>
 </body>
 </html>
