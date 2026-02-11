@@ -1,25 +1,24 @@
-# Ignore root application files
-index.html
-styles.css
-renderer.js
-main.js
-preload.js
-Ghost_Portable.zip
-deployment.zip
-netlify.toml
+# Ignore root application files ONLY
+/index.html
+/styles.css
+/renderer.js
+/main.js
+/preload.js
+/Ghost_Portable.zip
+/deployment.zip
+/netlify.toml
 
-# Ignore deep source code
-*.js
-!landing-page/*.js
-package.json
-.git
-.gitignore
-.gitattributes
-node_modules
-README.md
-eng.traineddata
-assets/
-icon.png
+# Ignore source code in root
+/*.js
+/package.json
+/.git
+/.gitignore
+/.gitattributes
+/node_modules
+/README.md
+/eng.traineddata
+/assets/
+/icon.png
 
-# Ensure landing-page is kept
-!landing-page/
+# Ensure landing-page directory is deployed
+!/landing-page/
