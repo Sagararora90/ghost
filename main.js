@@ -12,6 +12,7 @@ global.ImageData = class ImageData {
   }
 };
 global.Path2D = class Path2D {};
+require('dotenv').config();
 process.on('uncaughtException', (err) => { console.error('CRITICAL UNCAUGHT EXCEPTION:', err); });
 process.on('unhandledRejection', (reason) => { console.error('CRITICAL UNHANDLED REJECTION:', reason); });
 
@@ -103,7 +104,7 @@ if (!gotTheLock) {
 // DISCORD WEBHOOK LOGGING
 // ============================================================================
 
-const DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/1473261740904022088/tOhXXCkaTx9Z_JLcg7rUl4NAAfvURgMyi_Sy_h_9bmHYCfDtM9svq3SgTcVMBSRFY9hZ';
+const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL || '';
 
 async function sendDiscordLog(type, data) {
     try {
