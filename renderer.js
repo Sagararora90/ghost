@@ -1185,7 +1185,15 @@ function setupGlobalInterceptors() {
     // Dynamic Click-Through Management (Robust Strategy)
     window.addEventListener('mousemove', (e) => {
         try {
-            const interactive = e.target && e.target.closest && e.target.closest('.top-bar, button, input, textarea, .input-area, .send-btn, .action-bar, .action-buttons, .file-chip, .ocr-line, .keyword-tag, #ghostStatus, .remove-file, .copy-btn, .copy-btn *, .modal-body, .modal-footer, .modal-box, .auth-box, .onboarding-box, .overlay-content, .overlay-actions');
+            // CRITICAL: If ANY overlay/modal is visible, NEVER ignore mouse events
+            // Otherwise inputs inside modals become unclickable
+            const hasVisibleOverlay = document.querySelector('.overlay:not(.hidden)');
+            if (hasVisibleOverlay) {
+                window.electronAPI.setIgnoreMouseEvents(false);
+                return;
+            }
+
+            const interactive = e.target && e.target.closest && e.target.closest('.app-container, .top-bar, button, input, textarea, .input-area, .send-btn, .action-bar, .action-buttons, #chatContainer, #messages, .message, .file-chip, .ocr-line, .keyword-tag, #ghostStatus, .remove-file, .copy-btn, .copy-btn *, .modal-body, .modal-footer, .modal-box, .auth-box, .onboarding-box, .overlay-content, .overlay-actions');
             if (interactive) {
                 window.electronAPI.setIgnoreMouseEvents(false);
             } else {

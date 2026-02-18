@@ -20,6 +20,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // Event Listeners (Hotkeys from Main Process)
     onToggleMessages: (callback) => ipcRenderer.on('toggle-messages', () => callback()),
     onTriggerCapture: (callback) => ipcRenderer.on('trigger-capture', (event, ...args) => callback(...args)),
+    onAiStreamingChunk: (callback) => ipcRenderer.on('ai-streaming-chunk', (event, data) => callback(data)),
+    onAiStreamingComplete: (callback) => ipcRenderer.on('ai-streaming-complete', (event) => callback()),
+    onAiStreamingError: (callback) => ipcRenderer.on('ai-streaming-error', (event, data) => callback(data)),
     
     // Settings Storage
     getSetting: (key) => ipcRenderer.invoke('get-setting', key),
@@ -41,5 +44,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getAppVersion: () => ipcRenderer.invoke('get-app-version'),
     checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
     applyUpdate: (url) => ipcRenderer.invoke('apply-update', url),
-    openExternal: (url) => ipcRenderer.invoke('open-external', url)
+    openExternal: (url) => ipcRenderer.invoke('open-external', url),
+
+    // Auth System
+    authLogin: (username, password) => ipcRenderer.invoke('auth-login', username, password),
+    authSignup: (username, password, apiKeys) => ipcRenderer.invoke('auth-signup', username, password, apiKeys),
+    authCheck: () => ipcRenderer.invoke('auth-check'),
+    authLogout: () => ipcRenderer.invoke('auth-logout'),
+
+    // Window Controls
+    hideWindow: () => ipcRenderer.send('hide-window'),
+    quitApp: () => ipcRenderer.send('quit-app')
 });

