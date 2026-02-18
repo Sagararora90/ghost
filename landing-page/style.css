@@ -49,7 +49,7 @@ body {
 
 /* Header */
 header {
-  padding: 1.5rem 0;
+  padding: 1rem 1.5rem;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -59,6 +59,8 @@ header {
   backdrop-filter: blur(16px);
   border-bottom: 1px solid var(--border-color);
   background: rgba(3, 3, 4, 0.8);
+  gap: 1rem;
+  flex-wrap: wrap;
 }
 
 .logo {
@@ -89,6 +91,7 @@ h1 {
 .gradient-text {
   background: linear-gradient(135deg, #fff 0%, #999 100%);
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
@@ -274,8 +277,25 @@ footer {
 }
 
 @media(max-width: 768px) {
-  h1 { font-size: 2.5rem; }
+  h1 { font-size: 2.5rem; letter-spacing: -1px; }
   .bento-grid { gap: 1rem; }
   .cta-group { flex-direction: column; width: 100%; }
   .btn { width: 100%; justify-content: center; }
+  header { padding: 0.75rem 1rem; }
+  header nav .btn { font-size: 0.85rem; padding: 0.6rem 1rem; }
+  .logo { font-size: 1.1rem; }
+  .hero { padding: clamp(3rem, 10vh, 6rem) 0 3rem; }
+  .hero p { font-size: 1rem; }
+  .container { padding: 0 1rem; }
+  .shortcuts { margin: 2rem 0; }
+  .shortcut-row { padding: 0.75rem 1rem; font-size: 0.9rem; }
+}
+
+@media(max-width: 480px) {
+  h1 { font-size: 2rem; }
+  header { flex-direction: column; align-items: flex-start; }
+  header nav { width: 100%; }
+  header nav .btn { width: 100%; justify-content: center; }
+  .bento-card { padding: 1.5rem; }
+  .icon-box { width: 40px; height: 40px; font-size: 1rem; }
 }

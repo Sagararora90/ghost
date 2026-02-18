@@ -29,8 +29,12 @@ const messageInput = document.getElementById('messageInput');
 const sendButton = document.getElementById('sendButton');
 const messagesList = document.getElementById('messages');
 const chatContainer = document.getElementById('chatContainer');
-const clearChatBtn = document.getElementById('clearChat');
-const screenGrabBtn = document.getElementById('screenGrabBtn');
+const analyseScreenBtn = document.getElementById('analyseScreenBtn'); 
+const listenBtn = document.getElementById('listenBtn');
+const answerQuestionBtn = document.getElementById('answerQuestionBtn');
+const hideBtn = document.getElementById('hideBtn');
+const exitBtn = document.getElementById('exitBtn');
+const stopListeningBtn = document.getElementById('stopListeningBtn');
 const ocrOverlay = document.getElementById('ocrOverlay');
 const ocrLinesContainer = document.getElementById('ocrLines');
 const cancelOcrBtn = document.getElementById('cancelOcr');
@@ -38,7 +42,7 @@ const sendOcrBtn = document.getElementById('sendOcr');
 const listeningIndicator = document.getElementById('listeningIndicator');
 
 // Chat State
-let chatHistory = JSON.parse(localStorage.getItem('invisible-chat-history') || '[]');
+let chatHistory = []; // Loaded in loadSettings() after auth
 let selectedOcrLines = new Set();
 let isMeetingMode = false;
 let mediaRecorder = null;
@@ -48,12 +52,148 @@ let transcriptionBuffer = "";
 // Advanced Features State
 let isTtsEnabled = false;
 let voicesLoaded = false;
+let isSignupMode = false;
+
+// Streaming Global State
+let activeStreamingBody = null;
+let activeAccumulator = "";
 
 // Focus Management
-let focusCount = parseInt(localStorage.getItem('focus-count') || '0');
+let focusCount = 0; // Loaded in loadSettings() after auth
+
+// ===== AUTH SYSTEM =====
+
+function setupAuth() {
+    const overlay = document.getElementById('authOverlay');
+    const title = document.getElementById('authTitle');
+    const username = document.getElementById('authUsername');
+    const password = document.getElementById('authPassword');
+    const error = document.getElementById('authError');
+    const submit = document.getElementById('authSubmit');
+    const toggleBtn = document.getElementById('authToggleBtn');
+    const toggleText = document.getElementById('authToggleText');
+    if (!overlay) return;
+
+    toggleBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        isSignupMode = !isSignupMode;
+        title.textContent = isSignupMode ? 'Create Account' : 'Login';
+        submit.textContent = isSignupMode ? 'Create Account' : 'Login';
+        toggleText.textContent = isSignupMode ? 'Already have an account?' : "Don't have an account?";
+        toggleBtn.textContent = isSignupMode ? 'Login' : 'Create Account';
+        error.classList.add('hidden');
+        
+        // Toggle API Key field
+        const keyInput = document.getElementById('authKeyInput');
+        if (keyInput) {
+            if (isSignupMode) keyInput.classList.remove('hidden');
+            else keyInput.classList.add('hidden');
+        }
+    });
+
+    submit.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        await handleAuthSubmit();
+    });
+
+    // Enter key support
+    password.addEventListener('keydown', async (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); await handleAuthSubmit(); }
+    });
+    username.addEventListener('keydown', async (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); password.focus(); }
+    });
+}
+
+async function handleAuthSubmit() {
+    const username = document.getElementById('authUsername').value.trim();
+    const password = document.getElementById('authPassword').value;
+    const error = document.getElementById('authError');
+    const submit = document.getElementById('authSubmit');
+
+    if (!username || !password) {
+        error.textContent = 'Please enter username and password';
+        error.classList.remove('hidden');
+        return;
+    }
+
+    submit.disabled = true;
+    submit.textContent = 'Please wait...';
+    error.classList.add('hidden');
+
+    try {
+        let result;
+        if (isSignupMode) {
+            const apiKeys = document.getElementById('authKeyInput').value.trim();
+            result = await window.electronAPI.authSignup(username, password, apiKeys);
+        } else {
+            result = await window.electronAPI.authLogin(username, password);
+        }
+
+        if (result.success) {
+            document.getElementById('authOverlay').classList.add('hidden');
+            await continueInit();
+            
+            // If onboarding didn't show, drop focus for stealth
+            if (document.getElementById('onboardingOverlay').classList.contains('hidden')) {
+                window.electronAPI.setFocusable(false);
+                updateGhostStatus(true);
+            }
+        } else {
+            error.textContent = result.error || 'Authentication failed';
+            error.classList.remove('hidden');
+        }
+    } catch (e) {
+        error.textContent = 'Connection error';
+        error.classList.remove('hidden');
+    }
+
+    submit.disabled = false;
+    submit.textContent = isSignupMode ? 'Create Account' : 'Login';
+}
 
 // Initialize
 async function init() {
+    // Setup Global Streaming Listeners
+    window.electronAPI.onAiStreamingChunk((data) => {
+        if (activeStreamingBody) {
+            activeAccumulator += data.content;
+            activeStreamingBody.textContent = activeAccumulator;
+            scrollToBottom();
+        }
+    });
+
+    window.electronAPI.onAiStreamingError((data) => {
+        if (activeStreamingBody) {
+            activeStreamingBody.textContent = `Error: ${data.error}`;
+            activeStreamingBody.classList.add('error-text');
+        }
+        setLoading(false);
+    });
+
+    try {
+        // Check auth first — gate everything behind login
+        const auth = await window.electronAPI.authCheck();
+        setupAuth();
+        
+        if (!auth.loggedIn) {
+            // Enable focusable so user can type in auth fields
+            window.electronAPI.setFocusable(true);
+            document.getElementById('authOverlay').classList.remove('hidden');
+            // Auto-focus username field
+            setTimeout(() => document.getElementById('authUsername').focus(), 100);
+            return; // Don't init rest of app until auth
+        }
+
+        await continueInit();
+    } catch (error) {
+        console.error('Initialisation Error:', error);
+    }
+}
+
+async function continueInit() {
     try {
         renderHistory();
         await loadSettings();
@@ -70,11 +210,17 @@ async function init() {
             window.speechSynthesis.getVoices();
         }
 
+        // Initialize focus counter display
+        const fc = document.getElementById('focusCounter');
+        if (fc) fc.textContent = focusCount > 0 ? `Focus: ${focusCount}` : '0';
+
         // Check for updates (subtle)
         checkForAppUpdates();
+        
+        // UX: Check First Run Onboarding
+        checkFirstRun();
     } catch (error) {
-        console.error('Initialisation Error:', error);
-        alert('Init Error: ' + error.message);
+        console.error('App Init Error:', error);
     }
 }
 
@@ -95,12 +241,20 @@ async function loadSettings() {
     storedJDs = await window.electronAPI.getSetting('stored-jds') || [];
     storedProjects = await window.electronAPI.getSetting('stored-projects') || [];
 
+    // Load User History & Focus (Isolated)
+    chatHistory = await window.electronAPI.getSetting('invisible-chat-history') || [];
+    focusCount = parseInt(await window.electronAPI.getSetting('focus-count') || '0');
+
     // Sync to UI if open
     document.getElementById('groqKeyInput').value = GROQ_API_KEYS.join('\n');
     document.getElementById('userBioInput').value = USER_BIO;
     if (document.getElementById('userJdInput')) document.getElementById('userJdInput').value = USER_JD;
     if (document.getElementById('userProjectsInput')) document.getElementById('userProjectsInput').value = USER_PROJECTS;
     
+    // Update Focus UI
+    const fc = document.getElementById('focusCounter');
+    if (fc) fc.textContent = focusCount > 0 ? `Focus: ${focusCount}` : '0';
+
     renderFileLists();
     updateKeywordTicker();
 }
@@ -119,7 +273,7 @@ function renderList(elementId, dataArray, type) {
     dataArray.forEach((file, index) => {
         const chip = document.createElement('div');
         chip.className = 'file-chip';
-        chip.innerHTML = `<span>${file.name}</span><span class="remove-file" data-type="${type}" data-index="${index}">&times;</span>`;
+        chip.innerHTML = `<span>${file.name}</span><span class="remove-file" data-type="${type}" data-index="${index}" data-tooltip="Remove">&times;</span>`;
         container.appendChild(chip);
     });
 }
@@ -138,6 +292,41 @@ function checkOnboarding() {
 }
 
 function setupEventListeners() {
+    // Top Bar Actions
+    if (hideBtn) hideBtn.addEventListener('click', () => {
+        window.electronAPI.hideWindow();
+    });
+
+    if (exitBtn) exitBtn.addEventListener('click', () => {
+         window.electronAPI.quitApp();
+    });
+
+    // Focus Counter Reset
+    const fc = document.getElementById('focusCounter');
+    if (fc) {
+        fc.addEventListener('click', async () => {
+            focusCount = 0;
+            fc.textContent = '0';
+            await window.electronAPI.setSetting('focus-count', '0');
+            showToast('Focus Counter Reset', 'success');
+        });
+    }
+
+    if (stopListeningBtn) stopListeningBtn.addEventListener('click', () => {
+        // Stop listening logic here if implemented, or just hide indicator
+        listeningIndicator.classList.add('hidden');
+        stopListeningBtn.classList.add('hidden');
+    });
+
+    // Action Bar Actions
+    if (analyseScreenBtn) analyseScreenBtn.addEventListener('click', startScreenGrab);
+    
+    if (listenBtn) listenBtn.addEventListener('click', toggleMeetingMode);
+    
+    if (answerQuestionBtn) answerQuestionBtn.addEventListener('click', () => {
+        messageInput.focus();
+    });
+
     // Send message on Enter (but new line on Shift+Enter)
     messageInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
@@ -164,240 +353,12 @@ function setupEventListeners() {
         setTimeout(() => messageInput.focus(), 10);
     });
 
-    // Universal INTERCEPTOR (mousedown) - FIX: Added async
-    document.addEventListener('mousedown', async (e) => {
-        const ghostStatusEl = document.getElementById('ghostStatus');
-        const isTypingMode = ghostStatusEl && ghostStatusEl.classList.contains('active');
-        
-        const grabBtn = e.target.closest('#screenGrabBtn');
-        const robotBtn = e.target.closest('#robotIconContainer');
-        const ghostBtn = e.target.closest('#ghostStatus');
-        const settingsBtn = e.target.closest('#settingsBtn');
-        const uploadResumeBtn = e.target.closest('#uploadResumeBtn');
-        const uploadJdBtn = e.target.closest('#uploadJdBtn');
-        const uploadProjectBtn = e.target.closest('#uploadProjectBtn');
-        const uploadProjectFolderBtn = e.target.closest('#uploadProjectFolderBtn');
-        const closeSettings = e.target.closest('#closeSettings');
-        const saveSettings = e.target.closest('#saveSettings');
-        const onboardingBtn = e.target.closest('#finishOnboarding');
-        const ttsBtn = e.target.closest('#ttsBtn');
-        const ocrBtn = e.target.closest('#sendOcr');
-        const cancelBtn = e.target.closest('#cancelOcr');
-        const ocrLine = e.target.closest('.ocr-line');
-        const resetFocusBtn = e.target.closest('#resetFocusBtn');
-        const isModalInput = e.target.closest('.modal-content') && (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT');
-
-        // Allow focus for modal inputs
-        if (isModalInput) {
-            console.log('Modal input click - enabling focus');
-            window.electronAPI.setFocusable(true);
-            updateGhostStatus(false);
-            return;
-        }
-
-        // INTERCEPT AND RELEASE FOCUS for any interactive element
-        const removeFileBtn = e.target.closest('.remove-file');
-        const copyBtn = e.target.closest('.copy-btn');
-        const wipeAllDataBtn = e.target.closest('#wipeAllData');
-        const sendBtn = e.target.closest('#sendButton');
-        const clearChat = e.target.closest('#clearChat');
-
-        if (grabBtn || ttsBtn || robotBtn || ghostBtn || settingsBtn || uploadResumeBtn || uploadJdBtn || uploadProjectBtn || uploadProjectFolderBtn || closeSettings || saveSettings || onboardingBtn || ocrBtn || cancelBtn || ocrLine || removeFileBtn || copyBtn || resetFocusBtn || wipeAllDataBtn || sendBtn || clearChat) {
-            e.preventDefault();
-            e.stopPropagation();
-            e.stopImmediatePropagation();
-
-            // IMMUTABLE STEALTH: Drop all focus BEFORE executing logic
-            window.electronAPI.releaseFocus();
-            if (e.target.blur) e.target.blur();
-            if (document.activeElement && document.activeElement !== messageInput) document.activeElement.blur();
-            
-            // OCR Selection
-            // OCR Selection - Handled in click event now to allow text selection
-            if (ocrLine && !ocrBtn && !cancelBtn) {
-                // Do NOT prevent default here to allow selection
-                // The toggle logic is moved to a separate click handler
-                return; 
-            }
-
-            // File Removal
-            if (removeFileBtn) {
-                const type = removeFileBtn.dataset.type;
-                const index = parseInt(removeFileBtn.dataset.index);
-                removeFile(type, index);
-                return;
-            }
-
-            // Stealth Copy
-            if (copyBtn) {
-                const textToCopy = copyBtn.parentElement.querySelector('.bubble').textContent;
-                window.electronAPI.copyToClipboard(textToCopy).then(() => {
-                    console.log('Text copied to clipboard via Native API');
-                    copyBtn.textContent = '✅';
-                    setTimeout(() => copyBtn.textContent = '📄', 1500);
-                }).catch(err => console.error('Copy failed:', err));
-                return;
-            }
-
-            // Reset Focus Counter
-            if (resetFocusBtn) {
-                resetFocusCounter();
-                return;
-            }
-
-            // EXECUTE LOGIC MANUALLY ON MOUSEDOWN
-            if (grabBtn) startScreenGrab();
-            if (ttsBtn) toggleTts();
-            if (robotBtn) toggleMeetingMode();
-            if (sendBtn) sendMessage();
-            if (clearChat) {
-                chatHistory = [];
-                saveHistory();
-                renderHistory();
-            }
-            if (ghostBtn) { 
-                updateGhostStatus(true); 
-                messageInput.blur(); 
-            }
-            
-            // Settings Open/Close/Save
-            if (settingsBtn) {
-                document.getElementById('settingsModal').classList.remove('hidden');
-                if (window.electronAPI.setFocusable) window.electronAPI.setFocusable(true);
-            }
-            
-            if (closeSettings) {
-                document.getElementById('settingsModal').classList.add('hidden');
-                if (window.electronAPI.setFocusable) {
-                    window.electronAPI.setFocusable(false);
-                    window.electronAPI.releaseFocus();
-                }
-                updateGhostStatus(true);
-            }
-            
-            // FIX: Properly handle async save
-            if (saveSettings) {
-                try {
-                    const rawKeys = document.getElementById('groqKeyInput').value;
-                    const cleanKeys = rawKeys.split(/\r?\n/).map(k => k.trim()).filter(k => k.length > 0).join('\n');
-                    
-                    const bio = document.getElementById('userBioInput').value.trim();
-                    const jd = document.getElementById('userJdInput').value.trim();
-                    const projects = document.getElementById('userProjectsInput').value.trim();
-                    
-                    // Save all settings in parallel
-                    await Promise.all([
-                        window.electronAPI.setSetting('groq-api-key', cleanKeys),
-                        window.electronAPI.setSetting('user-bio', bio),
-                        window.electronAPI.setSetting('user-jd', jd),
-                        window.electronAPI.setSetting('user-projects', projects),
-                        window.electronAPI.setSetting('stored-resumes', storedResumes),
-                        window.electronAPI.setSetting('stored-jds', storedJDs),
-                        window.electronAPI.setSetting('stored-projects', storedProjects)
-                    ]);
-
-                    // RESET CHAT HISTORY on identity change to clear old persona
-                    chatHistory = [];
-                    saveHistory();
-                    renderHistory();
-
-                    await loadSettings();
-                    document.getElementById('settingsModal').classList.add('hidden');
-                    
-                    if (window.electronAPI.setFocusable) {
-                        window.electronAPI.setFocusable(false);
-                        window.electronAPI.releaseFocus();
-                    }
-                    updateGhostStatus(true);
-                } catch (error) {
-                    console.error('Settings save failed:', error);
-                    alert('Failed to save settings. Please try again.');
-                }
-            }
-
-            if (wipeAllDataBtn) {
-                if (confirm("Are you sure? This will delete all API keys, resumes, and project code forever.")) {
-                    localStorage.clear();
-                    await Promise.all([
-                        window.electronAPI.setSetting('groq-api-key', ''),
-                        window.electronAPI.setSetting('user-bio', ''),
-                        window.electronAPI.setSetting('user-jd', ''),
-                        window.electronAPI.setSetting('user-projects', ''),
-                        window.electronAPI.setSetting('stored-resumes', []),
-                        window.electronAPI.setSetting('stored-jds', []),
-                        window.electronAPI.setSetting('stored-projects', [])
-                    ]);
-                    location.reload(); 
-                }
-            }
-
-            // Onboarding
-            if (onboardingBtn) {
-                const key = document.getElementById('onboardingKeyInput').value.trim();
-                if (key) {
-                    await window.electronAPI.setSetting('groq-api-key', key);
-                    await loadSettings();
-                    document.getElementById('onboardingOverlay').classList.add('hidden');
-                    if (window.electronAPI.setFocusable) {
-                        window.electronAPI.setFocusable(false);
-                        window.electronAPI.releaseFocus();
-                    }
-                    updateGhostStatus(true);
-                }
-            }
-
-            // Uploads
-            if (uploadResumeBtn) handleResumeUpload();
-            if (uploadJdBtn) handleJdUpload();
-            if (uploadProjectBtn) handleProjectUpload();
-            if (uploadProjectFolderBtn) handleProjectFolderUpload();
-            
-            // OCR Actions
-            if (ocrBtn) {
-                window.electronAPI.releaseFocus();
-                sendSelectedOcrText();
-                if (window.electronAPI.setFocusable) window.electronAPI.setFocusable(false);
-            }
-            if (cancelBtn) {
-                window.electronAPI.releaseFocus();
-                hideOcrOverlay();
-            }
-            
-            // Manual Update Check
-            const checkUpdatesBtn = e.target.closest('#checkForUpdatesBtn');
-            if (checkUpdatesBtn) {
-                checkUpdatesBtn.textContent = "Checking...";
-                checkUpdatesBtn.disabled = true;
-                checkForAppUpdates(true); // Pass true to show alerts
-                setTimeout(() => {
-                    checkUpdatesBtn.textContent = "Check for Updates";
-                    checkUpdatesBtn.disabled = false;
-                }, 3000);
-            }
-
-            return;
-        }
-
-        if (isTypingMode && e.target !== messageInput) {
-            if (e.target.closest('.header') || e.target === chatContainer) {
-                console.log('Interacting outside input while focus active - releasing');
-                e.preventDefault();
-                e.stopPropagation();
-                window.electronAPI.releaseFocus();
-                updateGhostStatus(true);
-                messageInput.blur();
-            }
-        }
-    }, { capture: true });
-
-    // Toggle Visibility (Panic)
+    // Event listeners are now managed by setupGlobalInterceptors()
     window.electronAPI.onToggleMessages(() => {
         console.log('Panic toggle received');
         const inputSection = document.querySelector('.input-section');
-        
         chatContainer.classList.toggle('hidden');
         if (inputSection) inputSection.classList.toggle('hidden');
-        
         if (chatContainer.classList.contains('hidden')) {
             hideOcrOverlay();
         }
@@ -406,36 +367,12 @@ function setupEventListeners() {
     window.electronAPI.onTriggerCapture(() => {
         startScreenGrab();
     });
-
-    // Dynamic Click-Through Management
-    window.addEventListener('mouseenter', () => {
-        console.log('Mouse entered window - disabling click-through');
-        window.electronAPI.setIgnoreMouseEvents(false);
-    });
-    
-    window.addEventListener('mouseleave', () => {
-        console.log('Mouse left window - enabling click-through (Stealth Mode)');
-        window.electronAPI.setIgnoreMouseEvents(true, { forward: true });
-    });
-
-    // CLICK HANDLER for OCR Toggling (allows selection)
-    document.addEventListener('click', (e) => {
-        const ocrLine = e.target.closest('.ocr-line');
-        if (ocrLine) {
-            const selection = window.getSelection();
-            if (selection.toString().length > 0) {
-                // User is selecting text, do not toggle
-                return;
-            }
-            toggleOcrLine(ocrLine);
-        }
-    });
 }
 
 // FIX: Added focus counter reset function
 function resetFocusCounter() {
     focusCount = 0;
-    localStorage.setItem('focus-count', '0');
+    window.electronAPI.setSetting('focus-count', '0');
     messageInput.classList.remove('input-disabled');
     messageInput.placeholder = "Type your message...";
     console.log('Focus counter reset successfully');
@@ -668,7 +605,7 @@ function renderHistory() {
     messagesList.innerHTML = '';
     
     if (chatHistory.length === 0) {
-        addMessageToUI('assistant', "Hello! I'm your Invisible AI assistant. How can I help you today?");
+        addMessageToUI('system', 'System Ready. Use Analyse Screen or type a question.');
     } else {
         chatHistory.forEach(msg => {
             addMessageToUI(msg.role, msg.content);
@@ -679,33 +616,60 @@ function renderHistory() {
 
 function addMessageToUI(role, content) {
     const messageDiv = document.createElement('div');
-    messageDiv.className = `message ${role === 'user' ? 'user' : 'ai'}`;
+    messageDiv.className = `message ${role === 'user' ? 'user' : 'ai'} ${role === 'system' ? 'system' : ''}`;
     
-    const bubble = document.createElement('div');
-    bubble.className = 'bubble';
-    bubble.textContent = content;
-    
-    messageDiv.appendChild(bubble);
+    // Content Block Structure
+    const block = document.createElement('div');
+    block.className = 'content-block';
 
-    // Stealth Copy Button
-    const copyBtn = document.createElement('span');
-    copyBtn.className = 'copy-btn';
-    copyBtn.textContent = '📄';
-    copyBtn.title = 'Copy Text';
-    messageDiv.appendChild(copyBtn);
+    let contentElement;
+
+    if (role === 'system') {
+        const bodyDate = document.createElement('div');
+        bodyDate.className = 'block-body';
+        bodyDate.textContent = content;
+        block.appendChild(bodyDate);
+        contentElement = bodyDate;
+    } else {
+        const header = document.createElement('div');
+        header.className = 'block-header';
+        header.textContent = role === 'user' ? 'Summarized Question' : 'Answer';
+        
+        const body = document.createElement('div');
+        body.className = 'block-body';
+        body.textContent = content;
+
+        block.appendChild(header);
+        block.appendChild(body);
+        contentElement = body;
+    }
+
+    messageDiv.appendChild(block);
+
+    // Stealth Copy Button (Only for non-system)
+    if (role !== 'system') {
+        const copyBtn = document.createElement('span');
+        copyBtn.className = 'copy-btn';
+        copyBtn.textContent = '📄';
+        copyBtn.setAttribute('data-tooltip', 'Copy Text'); 
+        messageDiv.appendChild(copyBtn);
+    }
 
     messagesList.appendChild(messageDiv);
     scrollToBottom();
+    return contentElement; // Return body element to allow streaming updates
 }
 
 async function sendMessage() {
     const content = messageInput.value.trim();
     if (!content) return;
 
-    addMessageToUI('user', content);
-    chatHistory.push({ role: 'user', content: content });
+    // UI INSTANT CLEAR: Clear before anything else
     messageInput.value = '';
     autoResizeInput();
+
+    addMessageToUI('user', content);
+    chatHistory.push({ role: 'user', content: content });
     saveHistory();
 
     setLoading(true);
@@ -770,27 +734,33 @@ THE INTERVIEWER IS TALKING TO ME NOW:`;
     */
 
     try {
+        // Create assistant message placeholder
+        activeStreamingBody = addMessageToUI('assistant', '...');
+        activeStreamingBody.textContent = ''; // Clear placeholder
+        activeAccumulator = '';
+
         const result = await window.electronAPI.aiGenerateResponse({
             systemPrompt: systemPrompt,
             chatHistory: recentHistory,
             maxTokens: CONFIG.MAX_TOKENS
         });
 
-        if (!result.success) {
+        // Finalize
+        setLoading(false);
+        
+        if (result.success) {
+            activeStreamingBody.textContent = result.content; // Set final text to be sure
+            chatHistory.push({ role: 'assistant', content: result.content });
+            saveHistory();
+
+            if (isTtsEnabled) {
+                speakText(result.content);
+            }
+        } else {
             throw new Error(result.error);
         }
 
-        const aiMessage = result.content;
-
-        // Add AI response
-        addMessageToUI('assistant', aiMessage);
-        chatHistory.push({ role: 'assistant', content: aiMessage });
-        saveHistory();
-
-        if (isTtsEnabled) {
-            speakText(aiMessage);
-        }
-
+        activeStreamingBody = null; // Reset
     } catch (error) {
         console.error('AI Service Error:', error);
         let errorMessage = 'Error: Could not connect to AI service.';
@@ -825,7 +795,7 @@ function updateGhostStatus(isGhost) {
             ghostStatus.style.opacity = "0.3";
             
             focusCount++;
-            localStorage.setItem('focus-count', focusCount.toString());
+            window.electronAPI.setSetting('focus-count', focusCount.toString());
             
             if (focusCounter) {
                 focusCounter.textContent = `Focus: ${focusCount}`;
@@ -835,14 +805,16 @@ function updateGhostStatus(isGhost) {
     }
 }
 
+
+
 function setLoading(isLoading) {
     sendButton.disabled = isLoading;
     messageInput.disabled = isLoading;
     if (isLoading) {
         const typingDiv = document.createElement('div');
         typingDiv.id = 'typingIndicator';
-        typingDiv.className = 'message ai system';
-        typingDiv.innerHTML = '<div class="bubble">AI is thinking...</div>';
+        typingDiv.className = 'message ai';
+        typingDiv.innerHTML = '<div class="content-block"><div class="block-header">PROCESSING</div><div class="block-body">AI is thinking...</div></div>';
         messagesList.appendChild(typingDiv);
         scrollToBottom();
     } else {
@@ -861,20 +833,32 @@ function saveHistory() {
     const recentMessages = chatHistory.filter(m => m.role !== 'system').slice(-CONFIG.MAX_CHAT_HISTORY);
     chatHistory = [...systemMessages, ...recentMessages];
     
-    localStorage.setItem('invisible-chat-history', JSON.stringify(chatHistory));
+    window.electronAPI.setSetting('invisible-chat-history', chatHistory);
 }
 
 // Meeting Mode Logic (System Audio Only)
+// Meeting Mode Logic (System Audio Only)
 async function toggleMeetingMode() {
     isMeetingMode = !isMeetingMode;
-    const robotIcon = document.getElementById('robotIconContainer');
-    if (robotIcon) robotIcon.classList.toggle('active', isMeetingMode);
     
-    // Enhanced Visual Feedback
+    // UI Feedback on the Listen button
+    if (listenBtn) {
+        listenBtn.classList.toggle('active', isMeetingMode);
+        listenBtn.textContent = isMeetingMode ? '🛑 Stop Listen' : '🎙️ Listen';
+    }
+    
+    // Enhanced Visual Feedback (Indicator)
     if (listeningIndicator) {
         listeningIndicator.classList.toggle('active', isMeetingMode);
-        if (isMeetingMode) listeningIndicator.classList.add('pulse');
-        else listeningIndicator.classList.remove('pulse');
+        if (isMeetingMode) {
+            listeningIndicator.classList.remove('hidden');
+            listeningIndicator.classList.add('pulse');
+            if (stopListeningBtn) stopListeningBtn.classList.remove('hidden');
+        } else {
+            listeningIndicator.classList.add('hidden');
+            listeningIndicator.classList.remove('pulse');
+            if (stopListeningBtn) stopListeningBtn.classList.add('hidden');
+        }
     }
 
     if (isMeetingMode) {
@@ -1046,9 +1030,20 @@ async function startAudioCapture() {
     } catch (err) {
         console.error("Audio Capture Error:", err);
         isMeetingMode = false;
-        const robotIcon = document.getElementById('robotIconContainer');
-        if (robotIcon) robotIcon.classList.remove('active');
-        listeningIndicator.classList.remove('active');
+        
+        if (listenBtn) {
+            listenBtn.classList.remove('active');
+            listenBtn.textContent = '🎙️ Listen';
+        }
+        
+        if (listeningIndicator) {
+            listeningIndicator.classList.remove('active');
+            listeningIndicator.classList.add('hidden');
+        }
+        
+        if (stopListeningBtn) stopListeningBtn.classList.add('hidden');
+
+        addMessageToUI('system', "🎙️ Listen Error: Access denied. IMPORTANT: When the capture window appears, you MUST select 'System Audio' or 'Entire Screen' and check the 'Share Audio' box.");
         console.warn("Failed to start audio capture. Make sure to share 'System Audio'.");
     }
 }
@@ -1095,15 +1090,27 @@ async function processAudioChunk(blob) {
     }
 }
 
+// Proper semantic version comparison: returns 1 if a > b, -1 if a < b, 0 if equal
+function compareVersions(a, b) {
+    const pa = a.replace(/^v/, '').split('.').map(Number);
+    const pb = b.replace(/^v/, '').split('.').map(Number);
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+        const na = pa[i] || 0;
+        const nb = pb[i] || 0;
+        if (na > nb) return 1;
+        if (na < nb) return -1;
+    }
+    return 0;
+}
+
 async function checkForAppUpdates(showFeedback = false) {
     try {
         const currentVersion = await window.electronAPI.getAppVersion();
         const updateInfo = await window.electronAPI.checkForUpdates();
         
         if (updateInfo.success) {
-            // Simple version comparison: Only update if remote is newer
-            // (Assuming remote > current string comparison works for simple major.minor.patch)
-            if (updateInfo.version > currentVersion) {
+            // Semantic version comparison: Only update if remote is strictly newer
+            if (compareVersions(updateInfo.version, currentVersion) > 0) {
             console.log(`Update available: ${updateInfo.version} (Current: ${currentVersion})`);
             
             // Inject a subtle system message into the chat
@@ -1157,5 +1164,286 @@ async function checkForAppUpdates(showFeedback = false) {
     }
 }
 
-// Start
-document.addEventListener('DOMContentLoaded', init);
+// Final Initialization
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        init();
+        setupGlobalInterceptors();
+    });
+} else {
+    init();
+    setupGlobalInterceptors();
+}
+
+function setupGlobalInterceptors() {
+    // Only attach once
+    if (window._interceptorsAttached) return;
+    window._interceptorsAttached = true;
+
+    console.log("Global Interceptors Attached");
+
+    // Dynamic Click-Through Management (Robust Strategy)
+    window.addEventListener('mousemove', (e) => {
+        try {
+            const interactive = e.target && e.target.closest && e.target.closest('.top-bar, button, input, textarea, .input-area, .send-btn, .action-bar, .action-buttons, .file-chip, .ocr-line, .keyword-tag, #ghostStatus, .remove-file, .copy-btn, .copy-btn *, .modal-body, .modal-footer, .modal-box, .auth-box, .onboarding-box, .overlay-content, .overlay-actions');
+            if (interactive) {
+                window.electronAPI.setIgnoreMouseEvents(false);
+            } else {
+                window.electronAPI.setIgnoreMouseEvents(true, { forward: true });
+            }
+        } catch (err) {}
+    });
+
+    document.addEventListener('mousedown', async (e) => {
+        // ... (Interception Logic)
+        const grabBtn = e.target.closest('#analyseScreenBtn'); 
+        const meetingBtn = e.target.closest('#listenBtn');
+        const answerBtn = e.target.closest('#answerQuestionBtn');
+        const hideButton = e.target.closest('#hideBtn');
+        const exitButton = e.target.closest('#exitBtn');
+        const ghostBtn = e.target.closest('#ghostStatus');
+        const settingsBtn = e.target.closest('#settingsBtn');
+        const uploadResumeBtn = e.target.closest('#uploadResumeBtn');
+        const uploadJdBtn = e.target.closest('#uploadJdBtn');
+        const uploadProjectBtn = e.target.closest('#uploadProjectBtn');
+        const uploadProjectFolderBtn = e.target.closest('#uploadProjectFolderBtn');
+        const closeSettings = e.target.closest('#closeSettings');
+        const saveSettings = e.target.closest('#saveSettings');
+        const onboardingBtn = e.target.closest('#finishOnboarding');
+        const ttsBtn = e.target.closest('#ttsBtn');
+        const ocrBtn = e.target.closest('#sendOcr');
+        const cancelBtn = e.target.closest('#cancelOcr');
+        const ocrLine = e.target.closest('.ocr-line');
+        const resetFocusBtn = e.target.closest('#resetFocusBtn');
+        const isModalInput = e.target.closest('.modal-content, .modal-box') && (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT');
+        const isAuthInput = e.target.closest('.auth-box') && (e.target.tagName === 'INPUT');
+        const isOnboardingInput = e.target.closest('.onboarding-box') && (e.target.tagName === 'INPUT');
+        const isChatInput = e.target === messageInput;
+        const removeFileBtn = e.target.closest('.remove-file');
+        const copyBtn = e.target.closest('.copy-btn');
+        const wipeAllDataBtn = e.target.closest('#wipeAllData');
+        const checkForUpdatesBtn = e.target.closest('#checkForUpdatesBtn');
+        const sendBtn = e.target.closest('#sendButton');
+        const clearChat = e.target.closest('#clearChat');
+        const authSubmitBtn = e.target.closest('#authSubmit');
+        const authToggleBtn = e.target.closest('#authToggleBtn');
+
+        // Allow focus for all inputs
+        if (isModalInput || isAuthInput || isOnboardingInput || isChatInput) {
+            console.log('Input clicked - forcing focusable');
+            window.electronAPI.setFocusable(true);
+            updateGhostStatus(false);
+            
+            // EXPLICIT FOCUS: Ensure the element actually gets keyboard focus
+            const target = e.target.closest('input, textarea');
+            if (target) {
+                setTimeout(() => target.focus(), 10);
+            }
+            return;
+        }
+
+        const isInteractive = grabBtn || meetingBtn || answerBtn || hideButton || exitButton || ttsBtn || ghostBtn || settingsBtn || uploadResumeBtn || uploadJdBtn || uploadProjectBtn || uploadProjectFolderBtn || closeSettings || saveSettings || onboardingBtn || ocrBtn || cancelBtn || ocrLine || removeFileBtn || copyBtn || resetFocusBtn || wipeAllDataBtn || checkForUpdatesBtn || sendBtn || clearChat || authSubmitBtn || authToggleBtn;
+
+        if (isInteractive) {
+            e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+            
+            // STEALTH: Only release focus if NOT triggered by an upload button
+            // Uploads need the window to remain focusable for the system dialog
+            const isUpload = uploadResumeBtn || uploadJdBtn || uploadProjectBtn || uploadProjectFolderBtn;
+            if (!isUpload && !settingsBtn && !authSubmitBtn && !onboardingBtn && !saveSettings && !sendBtn) {
+                window.electronAPI.releaseFocus();
+                if (e.target.blur) e.target.blur();
+            } else {
+                // For modals/uploads/critical actions, ensure we ARE focusable
+                window.electronAPI.setFocusable(true);
+            }
+
+            if (ocrLine && !ocrBtn && !cancelBtn) return; // Toggle handled in click
+            if (removeFileBtn) { removeFile(removeFileBtn.dataset.type, parseInt(removeFileBtn.dataset.index)); return; }
+            if (copyBtn) {
+                const blockBody = copyBtn.parentElement.querySelector('.block-body');
+                if (blockBody) {
+                    window.electronAPI.copyToClipboard(blockBody.textContent).then(() => {
+                        copyBtn.textContent = '✅';
+                        setTimeout(() => { copyBtn.textContent = '📄'; }, 2000);
+                    });
+                }
+                return;
+            }
+            if (resetFocusBtn) { resetFocusCounter(); return; }
+            if (checkForUpdatesBtn) { checkForAppUpdates(true); return; }
+
+            // Manual Logic Execution
+            if (grabBtn) startScreenGrab();
+            if (answerBtn) {
+                window.electronAPI.setFocusable(true);
+                updateGhostStatus(false);
+                messageInput.focus();
+            }
+            if (meetingBtn) toggleMeetingMode();
+            if (authSubmitBtn) handleAuthSubmit();
+            if (authToggleBtn) {
+                isSignupMode = !isSignupMode;
+                const overlay = document.getElementById('authOverlay');
+                if (overlay) setupAuth(); // Refresh UI
+            }
+            if (ttsBtn) toggleTts();
+            if (uploadResumeBtn) handleResumeUpload();
+            if (uploadJdBtn) handleJdUpload();
+            if (uploadProjectBtn) handleProjectUpload();
+            if (uploadProjectFolderBtn) handleProjectFolderUpload();
+            if (hideButton) window.electronAPI.hideWindow();
+            if (exitButton) window.electronAPI.quitApp();
+            if (sendBtn) sendMessage();
+            if (clearChat) { chatHistory = []; saveHistory(); renderHistory(); }
+            if (ghostBtn) { updateGhostStatus(true); messageInput.blur(); }
+            if (settingsBtn) { document.getElementById('settingsModal').classList.remove('hidden'); window.electronAPI.setFocusable(true); }
+            if (closeSettings) { document.getElementById('settingsModal').classList.add('hidden'); window.electronAPI.setFocusable(false); window.electronAPI.releaseFocus(); updateGhostStatus(true); }
+            if (saveSettings) handleSaveSettings(); // Refactored to separate function for cleanliness
+            if (ocrBtn) { sendSelectedOcrText(); }
+            if (cancelBtn) { hideOcrOverlay(); }
+            if (onboardingBtn) {
+                const keyInput = document.getElementById('onboardingKeyInput');
+                const key = keyInput ? keyInput.value.trim() : '';
+                if (key) {
+                    window.electronAPI.setSetting('groq-api-key', key).then(() => {
+                        loadSettings();
+                        document.getElementById('onboardingOverlay').classList.add('hidden');
+                        window.electronAPI.setFocusable(false);
+                        window.electronAPI.releaseFocus();
+                        updateGhostStatus(true);
+                    });
+                }
+            }
+            if (wipeAllDataBtn) {
+                if (confirm("Are you sure? This will delete all API keys, resumes, and project code forever.")) {
+                    localStorage.clear();
+                    Promise.all([
+                        window.electronAPI.setSetting('groq-api-key', ''),
+                        window.electronAPI.setSetting('user-bio', ''),
+                        window.electronAPI.setSetting('user-jd', ''),
+                        window.electronAPI.setSetting('user-projects', ''),
+                        window.electronAPI.setSetting('stored-resumes', []),
+                        window.electronAPI.setSetting('stored-jds', []),
+                        window.electronAPI.setSetting('stored-projects', [])
+                    ]).then(() => location.reload()); 
+                }
+            }
+        }
+    }, { capture: true });
+}
+
+async function handleSaveSettings() {
+    try {
+        const saveBtn = document.getElementById('saveSettings');
+        if (saveBtn) {
+            saveBtn.textContent = "Saving...";
+            saveBtn.disabled = true;
+        }
+
+        const rawKeys = document.getElementById('groqKeyInput').value;
+        const cleanKeys = rawKeys.split(/\r?\n/).map(k => k.trim()).filter(k => k.length > 0).join('\n');
+        const bio = document.getElementById('userBioInput').value.trim();
+        const jd = document.getElementById('userJdInput').value.trim();
+        const projects = document.getElementById('userProjectsInput').value.trim();
+        
+        // SERIALIZED SAVES: Prevent Windows File Lock Race Conditions
+        await window.electronAPI.setSetting('groq-api-key', cleanKeys);
+        await window.electronAPI.setSetting('user-bio', bio);
+        await window.electronAPI.setSetting('user-jd', jd);
+        await window.electronAPI.setSetting('user-projects', projects);
+        await window.electronAPI.setSetting('stored-resumes', storedResumes);
+        await window.electronAPI.setSetting('stored-jds', storedJDs);
+        await window.electronAPI.setSetting('stored-projects', storedProjects);
+        
+        chatHistory = []; saveHistory(); renderHistory();
+        await loadSettings();
+        
+        if (saveBtn) {
+            saveBtn.textContent = "✅ Saved!";
+            saveBtn.style.background = "#22c55e";
+        }
+
+        setTimeout(() => {
+            document.getElementById('settingsModal').classList.add('hidden');
+            if (saveBtn) {
+                saveBtn.textContent = "Save";
+                saveBtn.style.background = "";
+                saveBtn.disabled = false;
+            }
+            window.electronAPI.setFocusable(false); 
+            window.electronAPI.releaseFocus(); 
+            updateGhostStatus(true);
+        }, 1000);
+
+    } catch (err) { 
+        console.error('Save failed:', err); 
+        const saveBtn = document.getElementById('saveSettings');
+        if (saveBtn) {
+            // Show actual error for debugging (e.g. EPERM)
+            const errMsg = err.code || err.message || "Unknown Error";
+            saveBtn.textContent = `❌ ${errMsg.substring(0, 15)}`;
+            saveBtn.disabled = false;
+        }
+    }
+}
+
+// === UX & VISUAL FEEDBACK UTILITIES ===
+
+function showToast(message, type = 'info') {
+    const container = document.getElementById('toastContainer');
+    if (!container) return;
+
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    
+    let icon = 'ℹ️';
+    if (type === 'success') icon = '✅';
+    if (type === 'error') icon = '❌';
+    
+    toast.innerHTML = `<span style="font-size: 1.2em;">${icon}</span> <span>${message}</span>`;
+    
+    container.appendChild(toast);
+    
+    // Remove after animation
+    setTimeout(() => {
+        if (toast.parentElement) toast.remove();
+    }, 3000);
+}
+
+// Global Error Handler
+window.onerror = function(message, source, lineno, colno, error) {
+    console.error('Global Error:', message, error);
+    if (message && message.includes('ResizeObserver')) return;
+    showToast(`System Error: ${message}`, 'error');
+};
+
+window.addEventListener('unhandledrejection', function(event) {
+    // Optional: showToast(`Async Error: ${event.reason}`, 'error');
+});
+
+// Onboarding Logic
+async function checkFirstRun() {
+    const hasSeen = await window.electronAPI.getSetting('has-seen-onboarding');
+    if (hasSeen === 'true') return;
+
+    // Show Welcome Message
+    const welcomeMsg = `
+        <div class="bubble" style="border: 1px solid var(--accent-blue); background: rgba(59, 130, 246, 0.1);">
+            <h3>👋 Welcome to Ghost AI</h3>
+            <p><strong>Stealth Mode Active:</strong> Calls will pass through the window unless you hold <code>Ctrl</code> or click a button.</p>
+            <hr style="border-color: var(--border-subtle); margin: 8px 0;">
+            <p><strong>Shortcuts:</strong></p>
+            <ul>
+                <li><code>Up + Down Arrows</code>: Toggle Visibility</li>
+                <li><code>Left + Right Arrows</code>: Capture Screen</li>
+                <li><code>Ctrl + .</code>: Emergency Toggle</li>
+            </ul>
+            <br>
+            <p><em>Tip: Click the "Focus" counter at the top to reset your limit.</em></p>
+        </div>
+    `;
+    addMessageToUI('system', welcomeMsg);
+    
+    await window.electronAPI.setSetting('has-seen-onboarding', 'true');
+}
