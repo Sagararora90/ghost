@@ -5,9 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Ghost | The Stealth AI Interview Partner</title>
     <link rel="stylesheet" href="style.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;800;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
     <!-- Font Awesome for icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Meta Tags for SEO & Social -->
+    <meta name="description" content="The world's first invisible AI assistant for technical interviews. Undetectable by proctoring software.">
+    <meta property="og:title" content="Ghost | Stealth AI Interview Partner">
+    <meta property="og:description" content="Crush your interview with an invisible AI partner.">
+    <meta property="og:image" content="icon.png">
+    <link rel="icon" type="image/png" href="icon.png">
 </head>
 <body>
     <div class="bg-glow"></div>
@@ -18,27 +26,28 @@
                 <i class="fas fa-ghost"></i> GHOST
             </div>
             <nav>
-                <a href="#features" class="btn btn-secondary" style="padding: 0.8rem 1.5rem; border-radius: 8px;">View Features</a>
+                <a href="#features" class="btn btn-secondary">View Features</a>
             </nav>
         </header>
 
         <section class="hero">
-            <h1>Crush Technical Interviews <br>with <span style="color: var(--accent-color);">Total Stealth.</span></h1>
+            <h1>Crush Technical Interviews <br>with <span style="background: linear-gradient(90deg, var(--accent-color), var(--secondary-accent)); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Total Stealth.</span></h1>
             <p>The world's first AI assistant that is completely invisible to screen sharing and proctoring software. Your secret partner in every call.</p>
             <div class="cta-group">
-                <a href="https://github.com/Sagararora90/ghost/releases/download/v1.0.10/Ghost_Portable.zip" class="btn btn-primary" download>
+                <a href="https://github.com/Sagararora90/ghost/releases/download/v1.0.27/Ghost_Portable.zip" class="btn btn-primary" download>
                     <i class="fab fa-windows"></i> Download for Windows
                 </a>
                 <button class="btn btn-secondary btn-icon" title="Copy Download Link" id="copyBtn">
                     <i class="fas fa-link"></i>
                 </button>
-                <a href="#features" class="btn btn-secondary">Explore Features</a>
             </div>
-            <p style="margin-top: 1rem; font-size: 0.9rem; opacity: 0.6;">Current Version: 1.0.10 <span class="tag" style="margin-left: 5px; background: rgba(0, 242, 254, 0.2); color: var(--accent-color); padding: 2px 8px;">STABLE</span></p>
+            <p style="margin-top: 1.5rem; font-size: 0.9rem; color: var(--text-secondary);">
+                Current Version: 1.0.27 <span class="tag">STABLE</span>
+            </p>
         </section>
 
         <section class="whats-new">
-            <h2>What's New in v1.0.4 <span class="tag">LATEST</span></h2>
+            <h2>What's New in v1.0.27 <span class="tag">LATEST</span></h2>
             <ul class="changelog">
                 <li>
                     <i class="fas fa-bolt"></i>
@@ -88,46 +97,46 @@
                 <p style="color: var(--text-secondary); font-size: 1.1rem; margin-bottom: 2rem;">
                     When you're in a high-pressure interview, you don't have time to look suspicious. Ghost AI uses global hotkeys and non-interactive overlays to guide you silently.
                 </p>
-                <ul style="list-style: none; margin-bottom: 2rem;">
-                    <li style="margin-bottom: 15px; display: flex; align-items: center; gap: 12px;">
-                        <i class="fas fa-check" style="color: var(--accent-color);"></i> Real-time Audio Transcription
+                <ul class="preview-list">
+                    <li>
+                        <i class="fas fa-check"></i> Real-time Audio Transcription
                     </li>
-                    <li style="margin-bottom: 15px; display: flex; align-items: center; gap: 12px;">
-                        <i class="fas fa-check" style="color: var(--accent-color);"></i> Instant OCR Screen Capture
+                    <li>
+                        <i class="fas fa-check"></i> Instant OCR Screen Capture
                     </li>
-                    <li style="margin-bottom: 15px; display: flex; align-items: center; gap: 12px;">
-                        <i class="fas fa-check" style="color: var(--accent-color);"></i> Multi-API Key Rotation
+                    <li>
+                        <i class="fas fa-check"></i> Multi-API Key Rotation
                     </li>
                 </ul>
             </div>
             <div class="preview-image">
-                <img src="icon.png" alt="Ghost Logo" style="width: 200px; margin: 40px auto; display: block; filter: drop-shadow(0 0 30px var(--accent-color));">
-                <div style="background: rgba(0,0,0,0.5); padding: 20px; border-top: 1px solid var(--glass-border); text-align: center;">
-                    <span style="font-family: monospace; font-size: 0.9rem; color: var(--accent-color); font-weight: bold;">[ GHOST READY: ACTIVE ]</span>
+                <img src="icon.png" alt="Ghost Logo">
+                <div style="margin-top: 1.5rem;">
+                    <span style="font-family: 'Fira Code', monospace; font-size: 0.9rem; color: var(--accent-color); font-weight: bold;">[ GHOST READY: ACTIVE ]</span>
                 </div>
             </div>
         </section>
 
         <section class="shortcuts">
-            <h2 style="text-align: center; font-size: 2.5rem;">Silent Controls</h2>
+            <h2 style="text-align: center; font-size: clamp(2rem, 4vw, 3rem);">Silent Controls</h2>
             <div class="shortcut-grid">
                 <div class="shortcut-item">
                     <span>Toggle Visibility</span>
-                    <div style="display: flex; gap: 5px;">
+                    <div class="keys">
                         <span class="kdb"><i class="fas fa-arrow-up"></i></span>
                         <span class="kdb"><i class="fas fa-arrow-down"></i></span>
                     </div>
                 </div>
                 <div class="shortcut-item">
                     <span>Quick Screen Capture</span>
-                    <div style="display: flex; gap: 5px;">
+                    <div class="keys">
                         <span class="kdb"><i class="fas fa-arrow-left"></i></span>
                         <span class="kdb"><i class="fas fa-arrow-right"></i></span>
                     </div>
                 </div>
                 <div class="shortcut-item">
                     <span>Emergency Exit</span>
-                    <div style="display: flex; gap: 5px;">
+                    <div class="keys">
                         <span class="kdb">Ctrl</span>
                         <span class="kdb">Shift</span>
                         <span class="kdb">Alt</span>
@@ -136,7 +145,7 @@
                 </div>
                 <div class="shortcut-item">
                     <span>Toggle Chat List</span>
-                    <div style="display: flex; gap: 5px;">
+                    <div class="keys">
                         <span class="kdb">Ctrl</span>
                         <span class="kdb">.</span>
                     </div>
@@ -151,16 +160,18 @@
 
     <script>
         document.getElementById('copyBtn').addEventListener('click', function() {
-            const url = "https://github.com/Sagararora90/ghost/releases/download/v1.0.10/Ghost_Portable.zip";
+            const url = "https://github.com/Sagararora90/ghost/releases/download/v1.0.27/Ghost_Portable.zip";
             navigator.clipboard.writeText(url).then(() => {
                 const icon = this.querySelector('i');
                 const originalClass = icon.className;
                 icon.className = 'fas fa-check';
                 this.style.background = 'rgba(0, 242, 254, 0.2)';
+                this.style.borderColor = 'var(--accent-color)';
                 
                 setTimeout(() => {
                     icon.className = originalClass;
                     this.style.background = '';
+                    this.style.borderColor = '';
                 }, 2000);
             });
         });
