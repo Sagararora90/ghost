@@ -7,10 +7,8 @@
     <link rel="stylesheet" href="style.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
-    <!-- Font Awesome for icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
-    <!-- Meta Tags for SEO & Social -->
     <meta name="description" content="The world's first invisible AI assistant for technical interviews. Undetectable by proctoring software.">
     <meta property="og:title" content="Ghost | Stealth AI Interview Partner">
     <meta property="og:description" content="Crush your interview with an invisible AI partner.">
@@ -18,6 +16,7 @@
     <link rel="icon" type="image/png" href="icon.png">
 </head>
 <body>
+    <div class="noise-overlay"></div>
     <div class="bg-glow"></div>
 
     <div class="container">
@@ -26,12 +25,12 @@
                 <i class="fas fa-ghost"></i> GHOST
             </div>
             <nav>
-                <a href="#features" class="btn btn-secondary">View Features</a>
+                <a href="#bento" class="btn btn-secondary">View Features</a>
             </nav>
         </header>
 
         <section class="hero">
-            <h1>Crush Technical Interviews <br>with <span style="background: linear-gradient(90deg, var(--accent-color), var(--secondary-accent)); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Total Stealth.</span></h1>
+            <h1>Crush Technical Interviews <br>with <span class="gradient-text">Total Stealth.</span></h1>
             <p>The world's first AI assistant that is completely invisible to screen sharing and proctoring software. Your secret partner in every call.</p>
             <div class="cta-group">
                 <a href="https://github.com/Sagararora90/ghost/releases/download/v1.0.27/Ghost_Portable.zip" class="btn btn-primary" download>
@@ -46,109 +45,82 @@
             </p>
         </section>
 
-        <section class="whats-new">
-            <h2>What's New in v1.0.27 <span class="tag">LATEST</span></h2>
-            <ul class="changelog">
-                <li>
-                    <i class="fas fa-bolt"></i>
-                    <div>
-                        <strong>One-Click Updates</strong>
-                        <p>Ghost now updates itself silently in the background. No more manual downloads.</p>
-                    </div>
-                </li>
-                <li>
-                    <i class="fas fa-mask"></i>
-                    <div>
-                        <strong>Advanced Stealth</strong>
-                        <p>Enhanced protection against Chromium-based focus detection and browser-level proctoring.</p>
-                    </div>
-                </li>
-                <li>
-                    <i class="fas fa-wand-magic-sparkles"></i>
-                    <div>
-                        <strong>Refined UI</strong>
-                        <p>Smoother overlays and better contrast for high-pressure coding environments.</p>
-                    </div>
-                </li>
-            </ul>
-        </section>
+        <!-- Bento Grid Section -->
+        <section class="bento-grid" id="bento">
+            <!-- Large Focus Card -->
+            <div class="bento-card span-md-2 span-lg-2 highlight-card">
+                <div class="card-content">
+                    <div class="icon-box"><i class="fas fa-eye-slash"></i></div>
+                    <h3>Invisible Overlay</h3>
+                    <p>Ghost sits on top of your screen but remains invisible to screen sharing tools like Zoom, Teams, and Google Meet. Only you can see the AI's guidance.</p>
+                </div>
+                <div class="card-visual overlay-visual"></div>
+            </div>
 
-        <section class="features" id="features">
-            <div class="card">
-                <i class="fas fa-shield-halved"></i>
-                <h3>Unbeatable Stealth</h3>
-                <p>Triple-layer focus guard and display affinity prevents proctoring software from detecting focus-stealing or background processes.</p>
+            <!-- Standard Card -->
+            <div class="bento-card">
+                <div class="card-content">
+                    <div class="icon-box"><i class="fas fa-shield-alt"></i></div>
+                    <h3>Anti-Proctor</h3>
+                    <p>Triple-layer focus guard prevents proctoring software from detecting focus loss or background processes.</p>
+                </div>
             </div>
-            <div class="card">
-                <i class="fas fa-eye-slash"></i>
-                <h3>Invisible Overlay</h3>
-                <p>The app remains invisible to screen recorders, Zoom, and Teams. Only you see the AI's guidance, nobody else does.</p>
-            </div>
-            <div class="card">
-                <i class="fas fa-brain"></i>
-                <h3>Context Awareness</h3>
-                <p>Upload your resume, projects, and JD. The AI roleplays as YOU, using your actual life experience in real-time answers.</p>
-            </div>
-        </section>
 
-        <section class="preview-grid">
-            <div class="preview-content">
-                <h2>Designed for <br><span style="color: var(--accent-color);">High Stakes.</span></h2>
-                <p style="color: var(--text-secondary); font-size: 1.1rem; margin-bottom: 2rem;">
-                    When you're in a high-pressure interview, you don't have time to look suspicious. Ghost AI uses global hotkeys and non-interactive overlays to guide you silently.
-                </p>
-                <ul class="preview-list">
-                    <li>
-                        <i class="fas fa-check"></i> Real-time Audio Transcription
-                    </li>
-                    <li>
-                        <i class="fas fa-check"></i> Instant OCR Screen Capture
-                    </li>
-                    <li>
-                        <i class="fas fa-check"></i> Multi-API Key Rotation
-                    </li>
-                </ul>
+            <!-- Standard Card -->
+            <div class="bento-card">
+                <div class="card-content">
+                    <div class="icon-box"><i class="fas fa-bolt"></i></div>
+                    <h3>Instant OCR</h3>
+                    <p>Capture coding problems instantly with a global hotkey. The AI reads the screen in milliseconds.</p>
+                </div>
             </div>
-            <div class="preview-image">
-                <img src="icon.png" alt="Ghost Logo">
-                <div style="margin-top: 1.5rem;">
-                    <span style="font-family: 'Fira Code', monospace; font-size: 0.9rem; color: var(--accent-color); font-weight: bold;">[ GHOST READY: ACTIVE ]</span>
+
+            <!-- Tall Card -->
+            <div class="bento-card span-row-2">
+                <div class="card-content">
+                    <div class="icon-box"><i class="fas fa-robot"></i></div>
+                    <h3>Context Aware</h3>
+                    <p>Upload your resume and the job description. Ghost roleplays as **YOU**, tailoring answers to your actual experience.</p>
+                    <div class="code-preview">
+                        <span class="comment">// AI Response</span>
+                        <span class="keyword">const</span> <span class="var">answer</span> = <span class="string">"Based on my experience..."</span>;
+                    </div>
+                </div>
+            </div>
+
+             <!-- Wide Card -->
+             <div class="bento-card span-md-2">
+                <div class="card-content">
+                    <div class="icon-box"><i class="fas fa-microphone-lines"></i></div>
+                    <h3>Audio Transcription</h3>
+                    <p>Real-time speech-to-text ensures you never miss a detail. The AI listens to the interviewer and suggests answers live.</p>
+                </div>
+            </div>
+
+            <!-- Standard Card -->
+            <div class="bento-card">
+                <div class="card-content">
+                    <div class="icon-box"><i class="fas fa-key"></i></div>
+                    <h3>Key Rotation</h3>
+                    <p>Smart API key management prevents rate limits during critical interview moments.</p>
                 </div>
             </div>
         </section>
 
         <section class="shortcuts">
-            <h2 style="text-align: center; font-size: clamp(2rem, 4vw, 3rem);">Silent Controls</h2>
-            <div class="shortcut-grid">
-                <div class="shortcut-item">
+            <h2 style="text-align: center; margin-bottom: 2rem; font-size: clamp(2rem, 4vw, 3rem);">Silent Controls</h2>
+            <div class="shortcut-list">
+                <div class="shortcut-row">
                     <span>Toggle Visibility</span>
-                    <div class="keys">
-                        <span class="kdb"><i class="fas fa-arrow-up"></i></span>
-                        <span class="kdb"><i class="fas fa-arrow-down"></i></span>
-                    </div>
+                    <div class="keys"><span class="kdb">↑</span><span class="kdb">↓</span></div>
                 </div>
-                <div class="shortcut-item">
-                    <span>Quick Screen Capture</span>
-                    <div class="keys">
-                        <span class="kdb"><i class="fas fa-arrow-left"></i></span>
-                        <span class="kdb"><i class="fas fa-arrow-right"></i></span>
-                    </div>
+                <div class="shortcut-row">
+                    <span>Quick Capture</span>
+                    <div class="keys"><span class="kdb">←</span><span class="kdb">→</span></div>
                 </div>
-                <div class="shortcut-item">
-                    <span>Emergency Exit</span>
-                    <div class="keys">
-                        <span class="kdb">Ctrl</span>
-                        <span class="kdb">Shift</span>
-                        <span class="kdb">Alt</span>
-                        <span class="kdb">Q</span>
-                    </div>
-                </div>
-                <div class="shortcut-item">
-                    <span>Toggle Chat List</span>
-                    <div class="keys">
-                        <span class="kdb">Ctrl</span>
-                        <span class="kdb">.</span>
-                    </div>
+                <div class="shortcut-row">
+                    <span>Emergency Quit</span>
+                    <div class="keys"><span class="kdb">Ctrl</span><span class="kdb">Shift</span><span class="kdb">Q</span></div>
                 </div>
             </div>
         </section>
@@ -163,18 +135,25 @@
             const url = "https://github.com/Sagararora90/ghost/releases/download/v1.0.27/Ghost_Portable.zip";
             navigator.clipboard.writeText(url).then(() => {
                 const icon = this.querySelector('i');
-                const originalClass = icon.className;
                 icon.className = 'fas fa-check';
-                this.style.background = 'rgba(0, 242, 254, 0.2)';
-                this.style.borderColor = 'var(--accent-color)';
-                
+                this.classList.add('success');
                 setTimeout(() => {
-                    icon.className = originalClass;
-                    this.style.background = '';
-                    this.style.borderColor = '';
+                    icon.className = 'fas fa-link';
+                    this.classList.remove('success');
                 }, 2000);
             });
         });
+
+        // Simple Scroll Reveal
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('visible');
+                }
+            });
+        }, { threshold: 0.1 });
+
+        document.querySelectorAll('.bento-card, .shortcut-row').forEach(el => observer.observe(el));
     </script>
 </body>
 </html>
