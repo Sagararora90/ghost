@@ -666,7 +666,7 @@ app.on('will-quit', () => {
 ipcMain.handle('perform-ocr', async (event, base64Image) => {
     try {
         // Validate size
-        if (!base64Image || base64Image.length > 20 * 1024 * 1024) { // Increased to 20MB for 4K
+        if (!base64Image || base64Image.length > 50 * 1024 * 1024) { // Increased to 50MB for 4K+
             throw new Error('Image too large or invalid');
         }
         

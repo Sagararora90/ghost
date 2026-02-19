@@ -42,7 +42,7 @@ async function initializeWorker({ tessPath }) {
         
         // Set parameters
         await worker.setParameters({
-            tessedit_pageseg_mode: '6', 
+            tessedit_pageseg_mode: '3', // 3 = Auto segmentation (Default) - Better for full screen layouts 
             tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,!?@#$%&*()-_=+[]{}<>:;"\'/|\\ ',
         });
 
@@ -67,8 +67,14 @@ async function performOCR({ imageBuffer }) {
     try {
         // Preprocess image in worker thread to prevent blocking Main thread
         const image = await Jimp.read(actualBuffer);
-        if (image.bitmap.width > 1000) image.resize(1000, Jimp.AUTO);
-        image.grayscale().contrast(0.2).normalize();
+
+        console.log(`[OCR-Worker] Processing Image: ${image.bitmap.width}x${image.bitmap.height}`);
+        
+        // UPSCALING: Scale 2x to improve accuracy for small screen text (Supersampling)
+        // This fixes the "Estimating resolution as 183" warning by giving Tesseract larger characters
+        image.scale(2); 
+
+        image.grayscale().contrast(0.25).normalize(); // Slight contrast boost
         const processedBuffer = await image.getBufferAsync(Jimp.MIME_PNG);
 
         const { data: { text } } = await worker.recognize(processedBuffer);
