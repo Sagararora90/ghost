@@ -689,6 +689,10 @@ async function showOcrOverlay(isLoading = false) {
 
     window.electronAPI.logToMain(`[DEBUG] showOcrOverlay state updates complete`);
 
+    // CRITICAL FIX: Ensure window is NOT focusable so clicks don't steal focus from Exam/Portal
+    // The 'stealth-click' handler in main.js will handle the clicks because isAppFocusable will be false.
+    await window.electronAPI.setFocusable(false);
+
     if (isLoading) {
         ocrLinesContainer.innerHTML = '<div class="message system"><div class="bubble">Scanning screen for text...</div></div>';
         updateOcrButtonState();
@@ -770,6 +774,8 @@ async function sendSelectedOcrText() {
     isIgnoringMouse = false; 
     // Sending OCR Text: Just needs to be active, no focus stealing needed
     updateGhostStatus(true);
+    // Ensure we don't accidentally leave it focusable if the user clicked something else
+    window.electronAPI.setFocusable(false);
 }
 
 // ===== UI FUNCTIONS =====
