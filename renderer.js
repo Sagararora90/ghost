@@ -4,17 +4,18 @@ const WHISPER_MODEL = 'whisper-large-v3';
 
 // Configuration Constants
 const CONFIG = {
-    MAX_CHAT_HISTORY: 10, // Reduced to save tokens
-    MAX_CONTEXT_CHARS: 15000, // Increased for better adherence
+    MAX_CHAT_HISTORY: 10,
+    MAX_CONTEXT_CHARS: 15000,
     AUDIO_CHUNK_DURATION_MS: 3000,
     MAX_TOKENS: 512,
     FOCUS_LIMIT: 500,
     TTS_SPEECH_RATE: 1.1
 };
 
-// Silence console for stealth
+// Silence console for stealth (commented out for development)
 // console.log = () => {};
 // console.error = () => {};
+
 let USER_BIO = '';
 let USER_JD = '';
 let USER_PROJECTS = '';
@@ -42,7 +43,7 @@ const sendOcrBtn = document.getElementById('sendOcr');
 const listeningIndicator = document.getElementById('listeningIndicator');
 
 // Chat State
-let chatHistory = []; // Loaded in loadSettings() after auth
+let chatHistory = [];
 let selectedOcrLines = new Set();
 let isMeetingMode = false;
 let mediaRecorder = null;
@@ -53,13 +54,31 @@ let transcriptionBuffer = "";
 let isTtsEnabled = false;
 let voicesLoaded = false;
 let isSignupMode = false;
+let ttsQueue = [];
+let isSpeaking = false;
 
 // Streaming Global State
 let activeStreamingBody = null;
 let activeAccumulator = "";
 
 // Focus Management
-let focusCount = 0; // Loaded in loadSettings() after auth
+let focusCount = 0;
+let isIgnoringMouse = false; // Global state for stealth mode mouse handling
+let isOverlayOpen = false; // CRITICAL: Stop interceptor when overlay is open
+
+// ===== UTILITY FUNCTIONS =====
+
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
 
 // ===== AUTH SYSTEM =====
 
@@ -84,7 +103,6 @@ function setupAuth() {
         toggleBtn.textContent = isSignupMode ? 'Login' : 'Create Account';
         error.classList.add('hidden');
         
-        // Toggle API Key field
         const keyInput = document.getElementById('authKeyInput');
         if (keyInput) {
             if (isSignupMode) keyInput.classList.remove('hidden');
@@ -98,7 +116,6 @@ function setupAuth() {
         await handleAuthSubmit();
     });
 
-    // Enter key support
     password.addEventListener('keydown', async (e) => {
         if (e.key === 'Enter') { e.preventDefault(); await handleAuthSubmit(); }
     });
@@ -108,13 +125,24 @@ function setupAuth() {
 }
 
 async function handleAuthSubmit() {
-    const username = document.getElementById('authUsername').value.trim();
-    const password = document.getElementById('authPassword').value;
     const error = document.getElementById('authError');
     const submit = document.getElementById('authSubmit');
+    const usernameEl = document.getElementById('authUsername');
+    const passwordEl = document.getElementById('authPassword');
+    
+    if (!usernameEl || !passwordEl || !error || !submit) return;
+
+    const username = usernameEl.value.trim();
+    const password = passwordEl.value;
 
     if (!username || !password) {
         error.textContent = 'Please enter username and password';
+        error.classList.remove('hidden');
+        return;
+    }
+
+    if (username.length < 3 || password.length < 4) {
+        error.textContent = 'Username (min 3) and Pasword (min 4) required';
         error.classList.remove('hidden');
         return;
     }
@@ -126,7 +154,8 @@ async function handleAuthSubmit() {
     try {
         let result;
         if (isSignupMode) {
-            const apiKeys = document.getElementById('authKeyInput').value.trim();
+            const keyEl = document.getElementById('authKeyInput');
+            const apiKeys = keyEl ? keyEl.value.trim() : '';
             result = await window.electronAPI.authSignup(username, password, apiKeys);
         } else {
             result = await window.electronAPI.authLogin(username, password);
@@ -136,9 +165,9 @@ async function handleAuthSubmit() {
             document.getElementById('authOverlay').classList.add('hidden');
             await continueInit();
             
-            // If onboarding didn't show, drop focus for stealth
-            if (document.getElementById('onboardingOverlay').classList.contains('hidden')) {
-                window.electronAPI.setFocusable(false);
+            const onboardingOverlay = document.getElementById('onboardingOverlay');
+            if (onboardingOverlay && onboardingOverlay.classList.contains('hidden')) {
+                await window.electronAPI.setFocusable(false);
                 updateGhostStatus(true);
             }
         } else {
@@ -154,9 +183,9 @@ async function handleAuthSubmit() {
     submit.textContent = isSignupMode ? 'Create Account' : 'Login';
 }
 
-// Initialize
+// ===== INITIALIZATION =====
+
 async function init() {
-    // Setup Global Streaming Listeners
     window.electronAPI.onAiStreamingChunk((data) => {
         if (activeStreamingBody) {
             activeAccumulator += data.content;
@@ -174,17 +203,16 @@ async function init() {
     });
 
     try {
-        // Check auth first — gate everything behind login
         const auth = await window.electronAPI.authCheck();
         setupAuth();
         
         if (!auth.loggedIn) {
-            // Enable focusable so user can type in auth fields
-            window.electronAPI.setFocusable(true);
-            document.getElementById('authOverlay').classList.remove('hidden');
-            // Auto-focus username field
-            setTimeout(() => document.getElementById('authUsername').focus(), 100);
-            return; // Don't init rest of app until auth
+            await window.electronAPI.setFocusable(true);
+            const authOverlay = document.getElementById('authOverlay');
+            const authUsername = document.getElementById('authUsername');
+            if (authOverlay) authOverlay.classList.remove('hidden');
+            if (authUsername) setTimeout(() => authUsername.focus(), 100);
+            return;
         }
 
         await continueInit();
@@ -201,24 +229,22 @@ async function continueInit() {
         autoResizeInput();
         checkOnboarding();
         
-        // Initialize TTS voices
         if (window.speechSynthesis) {
             window.speechSynthesis.onvoiceschanged = () => {
                 voicesLoaded = true;
             };
-            // Trigger voice loading
             window.speechSynthesis.getVoices();
         }
 
-        // Initialize focus counter display
         const fc = document.getElementById('focusCounter');
         if (fc) fc.textContent = focusCount > 0 ? `Focus: ${focusCount}` : '0';
 
-        // Check for updates (subtle)
         checkForAppUpdates();
-        
-        // UX: Check First Run Onboarding
         checkFirstRun();
+        
+        // Add memory cleanup interval
+        setInterval(cleanupMemory, 5 * 60 * 1000);
+        
     } catch (error) {
         console.error('App Init Error:', error);
     }
@@ -226,32 +252,26 @@ async function continueInit() {
 
 async function loadSettings() {
     const keys = await window.electronAPI.getSetting('groq-api-key') || '';
-    // Handle both old string format and new multiline format
     GROQ_API_KEYS = keys.split(/\r?\n/).map(k => k.trim()).filter(k => k.length > 0);
     
-    // If empty array, try legacy single key check (though split handles empty string -> [''])
     if (GROQ_API_KEYS.length === 0 && keys.length > 10) GROQ_API_KEYS = [keys];
 
     USER_BIO = await window.electronAPI.getSetting('user-bio') || '';
     USER_JD = await window.electronAPI.getSetting('user-jd') || '';
     USER_PROJECTS = await window.electronAPI.getSetting('user-projects') || '';
     
-    // Load File Lists (Default to empty arrays if not found)
     storedResumes = await window.electronAPI.getSetting('stored-resumes') || [];
     storedJDs = await window.electronAPI.getSetting('stored-jds') || [];
     storedProjects = await window.electronAPI.getSetting('stored-projects') || [];
 
-    // Load User History & Focus (Isolated)
     chatHistory = await window.electronAPI.getSetting('invisible-chat-history') || [];
     focusCount = parseInt(await window.electronAPI.getSetting('focus-count') || '0');
 
-    // Sync to UI if open
     document.getElementById('groqKeyInput').value = GROQ_API_KEYS.join('\n');
     document.getElementById('userBioInput').value = USER_BIO;
     if (document.getElementById('userJdInput')) document.getElementById('userJdInput').value = USER_JD;
     if (document.getElementById('userProjectsInput')) document.getElementById('userProjectsInput').value = USER_PROJECTS;
     
-    // Update Focus UI
     const fc = document.getElementById('focusCounter');
     if (fc) fc.textContent = focusCount > 0 ? `Focus: ${focusCount}` : '0';
 
@@ -291,8 +311,9 @@ function checkOnboarding() {
     }
 }
 
+// ===== EVENT LISTENERS =====
+
 function setupEventListeners() {
-    // Top Bar Actions
     if (hideBtn) hideBtn.addEventListener('click', () => {
         window.electronAPI.hideWindow();
     });
@@ -301,33 +322,24 @@ function setupEventListeners() {
          window.electronAPI.quitApp();
     });
 
-    // Focus Counter Reset
     const fc = document.getElementById('focusCounter');
     if (fc) {
         fc.addEventListener('click', async () => {
-            focusCount = 0;
-            fc.textContent = '0';
-            await window.electronAPI.setSetting('focus-count', '0');
-            showToast('Focus Counter Reset', 'success');
+            await resetFocusCounter();
         });
     }
 
     if (stopListeningBtn) stopListeningBtn.addEventListener('click', () => {
-        // Stop listening logic here if implemented, or just hide indicator
         listeningIndicator.classList.add('hidden');
         stopListeningBtn.classList.add('hidden');
     });
 
-    // Action Bar Actions
     if (analyseScreenBtn) analyseScreenBtn.addEventListener('click', startScreenGrab);
-    
     if (listenBtn) listenBtn.addEventListener('click', toggleMeetingMode);
-    
     if (answerQuestionBtn) answerQuestionBtn.addEventListener('click', () => {
         messageInput.focus();
     });
 
-    // Send message on Enter (but new line on Shift+Enter)
     messageInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
@@ -335,10 +347,8 @@ function setupEventListeners() {
         }
     });
 
-    // Auto-resize input
     messageInput.addEventListener('input', autoResizeInput);
 
-    // Focus Management (Ghost Mode)
     messageInput.addEventListener('mousedown', async (e) => {
         if (focusCount >= CONFIG.FOCUS_LIMIT) {
             e.preventDefault();
@@ -348,12 +358,12 @@ function setupEventListeners() {
             return;
         }
 
-        await window.electronAPI.setFocusable(true);
+        // INPUT CLICK: Must Force Window Focus
+        await window.electronAPI.setFocusable(true, true);
         updateGhostStatus(false);
         setTimeout(() => messageInput.focus(), 10);
     });
 
-    // Event listeners are now managed by setupGlobalInterceptors()
     window.electronAPI.onToggleMessages(() => {
         console.log('Panic toggle received');
         const inputSection = document.querySelector('.input-section');
@@ -367,148 +377,276 @@ function setupEventListeners() {
     window.electronAPI.onTriggerCapture(() => {
         startScreenGrab();
     });
+    
+    // Add keyboard shortcuts
+    document.addEventListener('keydown', handleKeyboardShortcuts);
+
+    // STEALTH CLICK HANDLER
+    window.electronAPI.onStealthClick((coords) => {
+        console.log(`[Stealth] Virtual click at ${coords.x}, ${coords.y}`);
+        const element = document.elementFromPoint(coords.x, coords.y);
+        if (element) console.log(`[Stealth] Hit Element: ${element.tagName} .${element.className} ID:${element.id}`);
+        
+        if (element) {
+            // Check if it's an interactive element (button, etc)
+            const clickable = element.closest('button, .ocr-line, .file-chip, .remove-file, .copy-btn, input, textarea, .action-pill');
+            if (clickable) {
+            // STEALTH INTERACTION SEQUENCE
+            // 1. Dispatch mousedown (triggers our app logic in renderer.js)
+            // Note: We don't update lastGlobalClickTime here because WE want this to fire.
+            // The global listener will update it.
+            const mousedown = new MouseEvent('mousedown', {
+                view: window,
+                bubbles: true,
+                cancelable: true,
+                clientX: coords.x,
+                clientY: coords.y
+            });
+            element.dispatchEvent(mousedown);
+
+            // 2. Dispatch mouseup (for completeness)
+            const mouseup = new MouseEvent('mouseup', {
+                view: window,
+                bubbles: true,
+                cancelable: true,
+                clientX: coords.x,
+                clientY: coords.y
+            });
+            element.dispatchEvent(mouseup);
+
+            // 3. Dispatch click (for standard listeners)
+            const click = new MouseEvent('click', {
+                view: window,
+                bubbles: true,
+                cancelable: true,
+                clientX: coords.x,
+                clientY: coords.y
+            });
+            element.dispatchEvent(click);
+            
+            // Special case for inputs: If they click input via stealth, FORCE focus
+            // This is the ONLY time we force window activation
+            if (clickable.tagName === 'INPUT' || clickable.tagName === 'TEXTAREA') {
+                window.electronAPI.setFocusable(true, true).then(() => {
+                        setTimeout(() => clickable.focus(), 50);
+                });
+            }
+        } else {
+            // Non-interactive click (background/text)
+            // Still dispatch safe standard click for OCR selection etc.
+            const click = new MouseEvent('click', {
+                view: window,
+                bubbles: true,
+                cancelable: true,
+                clientX: coords.x,
+                clientY: coords.y
+            });
+            element.dispatchEvent(click);
+        }
+        }
+    });
 }
 
-// FIX: Added focus counter reset function
-function resetFocusCounter() {
+function handleKeyboardShortcuts(e) {
+    if (e.ctrlKey && e.key === 'k') {
+        e.preventDefault();
+        messageInput.focus();
+    }
+    
+    if (e.key === 'Escape') {
+        const overlays = document.querySelectorAll('.overlay:not(.hidden)');
+        if (overlays.length > 0) {
+            overlays.forEach(o => o.classList.add('hidden'));
+            window.electronAPI.setFocusable(false);
+            window.electronAPI.releaseFocus();
+            updateGhostStatus(true);
+        }
+    }
+    
+    if (e.ctrlKey && e.key === 'l') {
+        e.preventDefault();
+        if (confirm('Clear chat history?')) {
+            chatHistory = [];
+            saveHistory();
+            renderHistory();
+        }
+    }
+}
+
+async function resetFocusCounter() {
     focusCount = 0;
-    window.electronAPI.setSetting('focus-count', '0');
+    await window.electronAPI.setSetting('focus-count', '0');
     messageInput.classList.remove('input-disabled');
     messageInput.placeholder = "Type your message...";
-    console.log('Focus counter reset successfully');
     
-    // Visual feedback
     const focusCounter = document.getElementById('focusCounter');
     if (focusCounter) {
-        focusCounter.textContent = 'Focus: 0';
+        focusCounter.textContent = '0';
         focusCounter.style.color = '#4CAF50';
         setTimeout(() => {
             focusCounter.style.color = '';
         }, 2000);
     }
+    
+    showToast('Focus Counter Reset', 'success');
 }
+
+// ===== FILE UPLOAD HANDLERS =====
 
 async function handleResumeUpload() {
     const filePath = await window.electronAPI.selectResumeFile();
-    if (filePath) {
-        const status = document.getElementById('uploadStatus');
-        status.classList.remove('hidden');
-        status.style.color = '#fff';
-        const fileName = filePath.split(/[\\/]/).pop();
-        status.textContent = "Parsing " + fileName + "...";
+    if (!filePath) return;
+    
+    const status = document.getElementById('uploadStatus');
+    const fileName = filePath.split(/[\\/]/).pop();
+    
+    status.classList.remove('hidden');
+    status.style.color = '#fff';
+    status.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 8px;">
+            <div class="spinner" style="width: 16px; height: 16px; border: 2px solid #fff; border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+            <span>Parsing ${fileName}...</span>
+        </div>
+    `;
+    
+    try {
+        console.log('Requesting parsing for:', filePath);
+        const text = await window.electronAPI.parseResumeFile(filePath);
         
-        try {
-            console.log('Requesting parsing for:', filePath);
-            const text = await window.electronAPI.parseResumeFile(filePath);
-            console.log('Parse result received. Length:', text ? text.trim().length : 0);
-            if (text && text.trim().length > 0) {
-                storedResumes.push({ name: fileName, content: text }); 
-                await window.electronAPI.setSetting('stored-resumes', storedResumes);
-                renderFileLists();
-                status.textContent = "Done!";
-            } else {
-                console.warn('Empty text returned from parse.');
-                throw new Error("No text content extracted.");
-            }
-        } catch (err) {
-            console.error('Resume parse error (UI):', err);
-            status.textContent = "Error: " + (err.message || "Failed to parse");
-            status.style.color = "#ff4b4b";
+        if (!text || text.trim().length === 0) {
+            throw new Error("No text content extracted");
         }
+        
+        storedResumes.push({ name: fileName, content: text }); 
+        await window.electronAPI.setSetting('stored-resumes', storedResumes);
+        
+        renderFileLists();
+        
+        status.innerHTML = `
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="color: #22c55e;">✅</span>
+                <span>Done! Extracted ${text.length} characters</span>
+            </div>
+        `;
+        
+        setTimeout(() => status.classList.add('hidden'), 3000);
+        
+    } catch (err) {
+        console.error('Resume parse error:', err);
+        status.innerHTML = `
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="color: #ef4444;">❌</span>
+                <span>Error: ${err.message || "Failed to parse"}</span>
+            </div>
+        `;
+        status.style.color = "#ef4444";
         setTimeout(() => status.classList.add('hidden'), 5000);
     }
 }
 
 async function handleJdUpload() {
     const filePath = await window.electronAPI.selectResumeFile(); 
-    if (filePath) {
-        const status = document.getElementById('jdUploadStatus');
-        status.classList.remove('hidden');
-        status.style.color = '#fff';
-        const fileName = filePath.split(/[\\/]/).pop();
-        status.textContent = "Parsing " + fileName + "...";
-        
-        try {
-            const text = await window.electronAPI.parseResumeFile(filePath);
-            if (text && text.trim().length > 0) {
-                storedJDs.push({ name: fileName, content: text });
-                await window.electronAPI.setSetting('stored-jds', storedJDs);
-                renderFileLists();
-                status.textContent = "Done!";
-            } else {
-                throw new Error("No text content extracted.");
-            }
-        } catch (err) {
-            console.error('JD parse error:', err);
-            status.textContent = "Error: " + (err.message || "Failed to parse");
-            status.style.color = "#ff4b4b";
+    if (!filePath) return;
+    
+    const status = document.getElementById('jdUploadStatus');
+    const fileName = filePath.split(/[\\/]/).pop();
+    
+    status.classList.remove('hidden');
+    status.style.color = '#fff';
+    status.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 8px;">
+            <div class="spinner"></div>
+            <span>Parsing ${fileName}...</span>
+        </div>
+    `;
+    
+    try {
+        const text = await window.electronAPI.parseResumeFile(filePath);
+        if (text && text.trim().length > 0) {
+            storedJDs.push({ name: fileName, content: text });
+            await window.electronAPI.setSetting('stored-jds', storedJDs);
+            renderFileLists();
+            status.innerHTML = `<span style="color: #22c55e;">✅</span> Done!`;
+        } else {
+            throw new Error("No text content extracted.");
         }
-        setTimeout(() => status.classList.add('hidden'), 5000);
+    } catch (err) {
+        console.error('JD parse error:', err);
+        status.innerHTML = `<span style="color: #ef4444;">❌</span> Error: ${err.message || "Failed to parse"}`;
+        status.style.color = "#ef4444";
     }
+    setTimeout(() => status.classList.add('hidden'), 5000);
 }
 
 async function handleProjectUpload() {
     const filePath = await window.electronAPI.selectProjectFile();
-    if (filePath) {
-        const status = document.getElementById('projectUploadStatus');
-        status.classList.remove('hidden');
-        status.style.color = '#fff';
-        const fileName = filePath.split(/[\\/]/).pop();
-        status.textContent = 'Parsing...';
-        
-        try {
-            const text = await window.electronAPI.parseProjectZip(filePath);
-            if (text) {
-                storedProjects.push({ name: fileName, content: text }); 
-                await window.electronAPI.setSetting('stored-projects', storedProjects);
-                renderFileLists();
-                status.textContent = 'Done!';
-            }
-        } catch (err) {
-            console.error('Project upload error:', err);
-            status.textContent = 'Error: ' + (err.message || "Failed to parse ZIP");
-            status.style.color = "#ff4b4b";
+    if (!filePath) return;
+    
+    const status = document.getElementById('projectUploadStatus');
+    const fileName = filePath.split(/[\\/]/).pop();
+    
+    status.classList.remove('hidden');
+    status.style.color = '#fff';
+    status.innerHTML = '<div class="spinner"></div> Parsing...';
+    
+    try {
+        const text = await window.electronAPI.parseProjectZip(filePath);
+        if (text) {
+            storedProjects.push({ name: fileName, content: text }); 
+            await window.electronAPI.setSetting('stored-projects', storedProjects);
+            renderFileLists();
+            status.innerHTML = '<span style="color: #22c55e;">✅</span> Done!';
         }
-        setTimeout(() => status.classList.add('hidden'), 5000);
+    } catch (err) {
+        console.error('Project upload error:', err);
+        status.innerHTML = `<span style="color: #ef4444;">❌</span> Error: ${err.message || "Failed to parse"}`;
+        status.style.color = "#ef4444";
     }
+    setTimeout(() => status.classList.add('hidden'), 5000);
 }
 
 async function handleProjectFolderUpload() {
     const filePath = await window.electronAPI.selectProjectFolder();
-    if (filePath) {
-        const status = document.getElementById('projectUploadStatus');
-        status.classList.remove('hidden');
-        status.style.color = '#fff';
-        const folderName = filePath.split(/[\\/]/).pop() + "/"; 
-        status.textContent = 'Scanning Folder...';
-        
-        try {
-            const text = await window.electronAPI.parseProjectFolder(filePath);
-            if (text) {
-                storedProjects.push({ name: folderName, content: text }); 
-                await window.electronAPI.setSetting('stored-projects', storedProjects);
-                renderFileLists();
-                status.textContent = 'Done!';
-            }
-        } catch (err) {
-            console.error('Folder upload error:', err);
-            status.textContent = 'Error: ' + (err.message || "Failed to parse folder");
-            status.style.color = "#ff4b4b";
+    if (!filePath) return;
+    
+    const status = document.getElementById('projectUploadStatus');
+    const folderName = filePath.split(/[\\/]/).pop() + "/"; 
+    
+    status.classList.remove('hidden');
+    status.style.color = '#fff';
+    status.innerHTML = '<div class="spinner"></div> Scanning Folder...';
+    
+    try {
+        const text = await window.electronAPI.parseProjectFolder(filePath);
+        if (text) {
+            storedProjects.push({ name: folderName, content: text }); 
+            await window.electronAPI.setSetting('stored-projects', storedProjects);
+            renderFileLists();
+            status.innerHTML = '<span style="color: #22c55e;">✅</span> Done!';
         }
-        setTimeout(() => status.classList.add('hidden'), 5000);
+    } catch (err) {
+        console.error('Folder upload error:', err);
+        status.innerHTML = `<span style="color: #ef4444;">❌</span> Error: ${err.message || "Failed to parse"}`;
+        status.style.color = "#ef4444";
     }
+    setTimeout(() => status.classList.add('hidden'), 5000);
 }
+
+// ===== SCREEN CAPTURE & OCR =====
 
 async function startScreenGrab() {
     try {
         setLoading(true);
+        // Ensure interactive state BEFORE we potentially lose it during capture
+        isOverlayOpen = true; 
+        
         const base64Image = await window.electronAPI.captureScreen();
         
         if (!base64Image) {
             throw new Error('Failed to capture screen');
         }
 
-        showOcrOverlay(true);
+        await showOcrOverlay(true);
         
         const lines = await window.electronAPI.performOcr(base64Image);
         
@@ -521,25 +659,54 @@ async function startScreenGrab() {
     } catch (error) {
         console.error('Screen Grab Error:', error);
         hideOcrOverlay();
+        showToast('Screen capture failed', 'error');
     } finally {
         setLoading(false);
     }
 }
 
-function showOcrOverlay(isLoading = false) {
+async function showOcrOverlay(isLoading = false) {
+    window.electronAPI.logToMain(`[DEBUG] showOcrOverlay called, isLoading: ${isLoading}`);
     ocrOverlay.classList.remove('hidden');
+    // FORCE INTERACTIVE STATE & STOP INTERCEPTOR
+    isOverlayOpen = true; 
+    isIgnoringMouse = false;
+    
+    // CRITICAL: Window must be focusable to receive clicks on Windows
+    window.electronAPI.logToMain(`[DEBUG] Requesting Focusable: true`);
+    // OCR: Just needs clicks, not focus stealing (unless user clicks input later)
+    // REMOVED setFocusable(true) to prevent floating focus. Rely on setIgnoreMouseEvents(false).
+    
+    // NUCLEAR FIX: Flush 'forward' state by disabling it first
+    window.electronAPI.logToMain(`[DEBUG] Requesting setIgnoreMouseEvents: true (forward: false)`);
+    await window.electronAPI.setIgnoreMouseEvents(true, { forward: false });
+    
+    window.electronAPI.logToMain(`[DEBUG] Requesting setIgnoreMouseEvents: false`);
+    await window.electronAPI.setIgnoreMouseEvents(false);
+
+    window.electronAPI.logToMain(`[DEBUG] showOcrOverlay state updates complete`);
+
     if (isLoading) {
         ocrLinesContainer.innerHTML = '<div class="message system"><div class="bubble">Scanning screen for text...</div></div>';
         updateOcrButtonState();
     }
 }
 
-function hideOcrOverlay() {
+async function hideOcrOverlay() {
     ocrOverlay.classList.add('hidden');
+    
+    // SMART SLEEP Fix:
+    // We do NOT force sleep here. If the mouse is still over the window, it should remain interactive.
+    // The global 'mousemove' interceptor will handle putting the app to sleep when the mouse leaves.
+    
+    // Just ensure the overlay state is reset so the interceptor knows we are "idle"
+    isOverlayOpen = false;
+
     selectedOcrLines.clear();
     setLoading(false);
     sendButton.disabled = false;
     messageInput.disabled = false;
+    updateGhostStatus(true);
 }
 
 function renderOcrLines(lines) {
@@ -552,12 +719,16 @@ function renderOcrLines(lines) {
         return;
     }
 
+    if (lines.length === 1 && lines[0].startsWith('Error:')) {
+         ocrLinesContainer.innerHTML = `<div class="message system"><div class="bubble error-text">${lines[0]}</div></div>`;
+         return;
+    }
+
     lines.forEach((line, index) => {
         const lineDiv = document.createElement('div');
         lineDiv.className = 'ocr-line';
         lineDiv.textContent = line;
         lineDiv.dataset.index = index;
-        // lineDiv.onmousedown = (e) => e.preventDefault(); // Removed to allow selection
         lineDiv.setAttribute('tabindex', '-1');
         ocrLinesContainer.appendChild(lineDiv);
     });
@@ -580,26 +751,31 @@ function updateOcrButtonState() {
     if (count > 0) {
         sendOcrBtn.style.opacity = "1";
         sendOcrBtn.style.pointerEvents = "auto";
+        sendOcrBtn.disabled = false;
     } else {
         sendOcrBtn.style.opacity = "0.5";
         sendOcrBtn.style.pointerEvents = "none";
+        sendOcrBtn.disabled = true;
     }
 }
 
-function sendSelectedOcrText() {
+async function sendSelectedOcrText() {
     const combinedText = Array.from(selectedOcrLines).join('\n');
     messageInput.value += (messageInput.value ? '\n' : '') + combinedText;
-    autoResizeInput();
     hideOcrOverlay();
-    window.electronAPI.setFocusable(false);
-    window.electronAPI.releaseFocus();
+    // SMART SLEEP: Don't force sleep. Let interceptor handle it.
+    isIgnoringMouse = false; 
+    // Sending OCR Text: Just needs to be active, no focus stealing needed
     updateGhostStatus(true);
 }
 
-function autoResizeInput() {
+// ===== UI FUNCTIONS =====
+
+const autoResizeInput = debounce(function() {
     messageInput.style.height = 'auto';
-    messageInput.style.height = messageInput.scrollHeight + 'px';
-}
+    const newHeight = Math.min(messageInput.scrollHeight, 200);
+    messageInput.style.height = newHeight + 'px';
+}, 50);
 
 function renderHistory() {
     messagesList.innerHTML = '';
@@ -618,7 +794,6 @@ function addMessageToUI(role, content) {
     const messageDiv = document.createElement('div');
     messageDiv.className = `message ${role === 'user' ? 'user' : 'ai'} ${role === 'system' ? 'system' : ''}`;
     
-    // Content Block Structure
     const block = document.createElement('div');
     block.className = 'content-block';
 
@@ -627,7 +802,12 @@ function addMessageToUI(role, content) {
     if (role === 'system') {
         const bodyDate = document.createElement('div');
         bodyDate.className = 'block-body';
-        bodyDate.textContent = content;
+        // USE HTML only if explicitly formatted, otherwise textContent
+        if (content.trim().startsWith('<')) {
+            bodyDate.innerHTML = content;
+        } else {
+            bodyDate.textContent = content;
+        }
         block.appendChild(bodyDate);
         contentElement = bodyDate;
     } else {
@@ -646,7 +826,6 @@ function addMessageToUI(role, content) {
 
     messageDiv.appendChild(block);
 
-    // Stealth Copy Button (Only for non-system)
     if (role !== 'system') {
         const copyBtn = document.createElement('span');
         copyBtn.className = 'copy-btn';
@@ -657,14 +836,17 @@ function addMessageToUI(role, content) {
 
     messagesList.appendChild(messageDiv);
     scrollToBottom();
-    return contentElement; // Return body element to allow streaming updates
+    return contentElement;
 }
 
 async function sendMessage() {
+    console.log('[DEBUG] sendMessage called');
     const content = messageInput.value.trim();
-    if (!content) return;
+    if (!content) {
+        console.log('[DEBUG] sendMessage aborted: empty content');
+        return;
+    }
 
-    // UI INSTANT CLEAR: Clear before anything else
     messageInput.value = '';
     autoResizeInput();
 
@@ -674,26 +856,23 @@ async function sendMessage() {
 
     setLoading(true);
     
-    // Drop Focus immediately
+    // SMART SLEEP: Keep focus for reading. Interceptor handles sleep.
     if (window.electronAPI.setFocusable) {
-        window.electronAPI.setFocusable(false);
-        window.electronAPI.releaseFocus();
+        // Post-Message: Stay active but don't steal focus
+        isIgnoringMouse = false;
         updateGhostStatus(true);
     }
 
-    // ENHANCED: Aggregate ALL uploaded content with priority to files
     let fullBio = (storedResumes.map(f => f.content).join("\n\n") + (USER_BIO ? "\n\n" + USER_BIO : "")).trim();
     let fullJD = (storedJDs.map(f => f.content).join("\n\n") + (USER_JD ? "\n\n" + USER_JD : "")).trim();
     let fullProjects = (storedProjects.map(f => f.content).join("\n\n") + (USER_PROJECTS ? "\n\n" + USER_PROJECTS : "")).trim();
 
-    // TRUNCATION: Prevent 400 Context Errors
     if (fullBio.length > CONFIG.MAX_CONTEXT_CHARS) fullBio = fullBio.substring(0, CONFIG.MAX_CONTEXT_CHARS) + "... [Truncated]";
     if (fullJD.length > 2000) fullJD = fullJD.substring(0, 2000) + "... [Truncated]";
     if (fullProjects.length > CONFIG.MAX_CONTEXT_CHARS) fullProjects = fullProjects.substring(0, CONFIG.MAX_CONTEXT_CHARS) + "... [Truncated]";
 
     const recentHistory = chatHistory.slice(-CONFIG.MAX_CHAT_HISTORY);
 
-    // ULTIMATE HUMAN PERSONA PROMPT: Nervous Indian Interviewee (20yo)
     const systemPrompt = `[MY CONTEXT & DATA]
 MY LIFE STORY (ABSOLUTE TRUTH):
 ${fullBio ? `━━━ BACKGROUND ━━━
@@ -721,22 +900,9 @@ ${fullJD || 'No JD provided.'}
 
 THE INTERVIEWER IS TALKING TO ME NOW:`;
 
-    /* 
-    console.log("--- CONTEXT DEBUG ---");
-    console.log("Resume Files:", storedResumes.length);
-    console.log("JD Files:", storedJDs.length);
-    console.log("Project Files:", storedProjects.length);
-    console.log("Bio Length:", fullBio.length, "chars");
-    console.log("JD Length:", fullJD.length, "chars");
-    console.log("Projects Length:", fullProjects.length, "chars");
-    console.log("System Prompt Length:", systemPrompt.length, "chars");
-    console.log("--------------------");
-    */
-
     try {
-        // Create assistant message placeholder
         activeStreamingBody = addMessageToUI('assistant', '...');
-        activeStreamingBody.textContent = ''; // Clear placeholder
+        activeStreamingBody.textContent = '';
         activeAccumulator = '';
 
         const result = await window.electronAPI.aiGenerateResponse({
@@ -745,11 +911,10 @@ THE INTERVIEWER IS TALKING TO ME NOW:`;
             maxTokens: CONFIG.MAX_TOKENS
         });
 
-        // Finalize
         setLoading(false);
         
         if (result.success) {
-            activeStreamingBody.textContent = result.content; // Set final text to be sure
+            activeStreamingBody.textContent = result.content;
             chatHistory.push({ role: 'assistant', content: result.content });
             saveHistory();
 
@@ -760,7 +925,7 @@ THE INTERVIEWER IS TALKING TO ME NOW:`;
             throw new Error(result.error);
         }
 
-        activeStreamingBody = null; // Reset
+        activeStreamingBody = null;
     } catch (error) {
         console.error('AI Service Error:', error);
         let errorMessage = 'Error: Could not connect to AI service.';
@@ -773,10 +938,13 @@ THE INTERVIEWER IS TALKING TO ME NOW:`;
         addMessageToUI('system', `${errorMessage} (${error.message})`);
     } finally {
         setLoading(false);
+        // SMART SLEEP: We do NOT force sleep here.
+        // The app should remain interactive (scrollable/selectable) as long as the mouse is over it.
+        // The global 'mousemove' interceptor will handle putting the app to sleep when the mouse leaves.
         if (window.electronAPI.setFocusable) {
-            window.electronAPI.setFocusable(false);
-            window.electronAPI.releaseFocus();
-            updateGhostStatus(true);
+             // Just ensure we're in a consistent state, but keep it focusable if mouse is here.
+             // Actually, we don't need to do anything. The interceptor handles it.
+             // We just update the ghost status visual if needed, but not the actual window state.
         }
     }
 }
@@ -805,11 +973,15 @@ function updateGhostStatus(isGhost) {
     }
 }
 
-
-
 function setLoading(isLoading) {
     sendButton.disabled = isLoading;
-    messageInput.disabled = isLoading;
+    // SMART INPUT FIX: 
+    // Only disable input if we actually have focus (active usage). 
+    // If we are in stealth mode (passive click), disabling input triggers a blur/focus-shift 
+    // that can activate the window or flash the taskbar.
+    if (document.hasFocus()) {
+        messageInput.disabled = isLoading;
+    }
     if (isLoading) {
         const typingDiv = document.createElement('div');
         typingDiv.id = 'typingIndicator';
@@ -823,31 +995,45 @@ function setLoading(isLoading) {
     }
 }
 
-function scrollToBottom() {
-    chatContainer.scrollTop = chatContainer.scrollHeight;
+function scrollToBottom(smooth = false) {
+    if (smooth) {
+        chatContainer.scrollTo({
+            top: chatContainer.scrollHeight,
+            behavior: 'smooth'
+        });
+    } else {
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+    }
 }
 
 function saveHistory() {
-    // Keep system messages + last N exchanges for context preservation
-    const systemMessages = chatHistory.filter(m => m.role === 'system');
-    const recentMessages = chatHistory.filter(m => m.role !== 'system').slice(-CONFIG.MAX_CHAT_HISTORY);
-    chatHistory = [...systemMessages, ...recentMessages];
+    const systemMessages = [];
+    const recentMessages = [];
     
+    // Single pass filtering for efficiency
+    for (let i = chatHistory.length - 1; i >= 0; i--) {
+        const msg = chatHistory[i];
+        if (msg.role === 'system') {
+            systemMessages.unshift(msg);
+        } else if (recentMessages.length < CONFIG.MAX_CHAT_HISTORY) {
+            recentMessages.unshift(msg);
+        }
+    }
+    
+    chatHistory = [...systemMessages, ...recentMessages];
     window.electronAPI.setSetting('invisible-chat-history', chatHistory);
 }
 
-// Meeting Mode Logic (System Audio Only)
-// Meeting Mode Logic (System Audio Only)
+// ===== MEETING MODE & AUDIO =====
+
 async function toggleMeetingMode() {
     isMeetingMode = !isMeetingMode;
     
-    // UI Feedback on the Listen button
     if (listenBtn) {
         listenBtn.classList.toggle('active', isMeetingMode);
         listenBtn.textContent = isMeetingMode ? '🛑 Stop Listen' : '🎙️ Listen';
     }
     
-    // Enhanced Visual Feedback (Indicator)
     if (listeningIndicator) {
         listeningIndicator.classList.toggle('active', isMeetingMode);
         if (isMeetingMode) {
@@ -868,123 +1054,60 @@ async function toggleMeetingMode() {
     }
 }
 
-// TTS Toggle
-function toggleTts() {
-    isTtsEnabled = !isTtsEnabled;
-    const btn = document.getElementById('ttsBtn');
-    if (btn) btn.classList.toggle('active', isTtsEnabled);
-    
-    if (isTtsEnabled) {
-        speakText("Text-to-Speech Activated");
-    } else {
-        window.speechSynthesis.cancel();
-    }
-}
-
-// FIX: Proper voice loading with race condition handling
-function speakText(text) {
-    if (!window.speechSynthesis) return;
-    
-    // Wait for voices if not loaded
-    if (!voicesLoaded) {
-        const voices = window.speechSynthesis.getVoices();
-        if (voices.length === 0) {
-            setTimeout(() => speakText(text), 100);
-            return;
-        }
-        voicesLoaded = true;
-    }
-    
-    window.speechSynthesis.cancel();
-    
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = CONFIG.TTS_SPEECH_RATE;
-    utterance.pitch = 1.0;
-    
-    const voices = window.speechSynthesis.getVoices();
-    const femaleVoiceKeywords = ['Female', 'Zira', 'Samantha', 'Microsoft Zira', 'Google UK English Female', 'Sara', 'Victoria'];
-    
-    let preferredVoice = voices.find(v => 
-        (v.name.includes('Google') || v.name.includes('Natural')) && 
-        femaleVoiceKeywords.some(kw => v.name.includes(kw))
-    );
-    
-    if (!preferredVoice) {
-        preferredVoice = voices.find(v => femaleVoiceKeywords.some(kw => v.name.includes(kw)));
-    }
-    
-    if (!preferredVoice) preferredVoice = voices[0];
-    
-    if (preferredVoice) utterance.voice = preferredVoice;
-    
-    window.speechSynthesis.speak(utterance);
-}
-
-// JD Keyword Ticker
-function updateKeywordTicker() {
-    const ticker = document.getElementById('tickerBar');
-    if (!ticker) return;
-    
-    if (!USER_JD) {
-        ticker.classList.add('hidden');
-        return;
-    }
-    
-    ticker.classList.remove('hidden');
-    ticker.innerHTML = '';
-    
-    const keywords = extractKeywords(USER_JD);
-    keywords.forEach(word => {
-        const tag = document.createElement('span');
-        tag.className = 'keyword-tag';
-        tag.textContent = word;
-        tag.onclick = () => tag.classList.toggle('dimmed');
-        ticker.appendChild(tag);
-    });
-}
-
-function extractKeywords(text) {
-    const commonWords = new Set(['experience', 'required', 'responsibilities', 'qualifications', 'working', 'skills', 'ability']);
-    const words = text.match(/[A-Z][a-z]+|\b[a-z]{5,}\b/g) || [];
-    
-    const freqMap = {};
-    words.forEach(w => {
-        const lower = w.toLowerCase();
-        if (commonWords.has(lower)) return;
-        freqMap[lower] = (freqMap[lower] || 0) + 1;
-    });
-    
-    return Object.keys(freqMap)
-        .sort((a, b) => freqMap[b] - freqMap[a])
-        .slice(0, 10);
-}
-
 async function startAudioCapture() {
     try {
         const sourceId = await window.electronAPI.getPrimarySourceId();
         if (!sourceId) throw new Error("No screen source found");
 
+        window.electronAPI.logToMain(`[Audio] Requesting stream for source: ${sourceId}`);
+        
         const stream = await navigator.mediaDevices.getUserMedia({
             audio: {
-                mandatory: {
-                    chromeMediaSource: 'desktop',
-                    chromeMediaSourceId: sourceId
-                }
+                chromeMediaSource: 'desktop',
+                chromeMediaSourceId: sourceId
             },
             video: {
-                mandatory: {
-                    chromeMediaSource: 'desktop',
-                    chromeMediaSourceId: sourceId
-                }
+                chromeMediaSource: 'desktop',
+                chromeMediaSourceId: sourceId,
+                maxWidth: 1,
+                maxHeight: 1
             }
         });
+        
+        window.electronAPI.logToMain(`[Audio] Stream obtained successfully`);
 
         stream.getVideoTracks().forEach(track => track.stop());
         
         const audioTracks = stream.getAudioTracks();
         console.log("Audio Tracks captured:", audioTracks.length);
 
-        mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+        if (audioTracks.length === 0) {
+            throw new Error("No audio track found. Did you check 'Share Audio'?");
+        }
+
+        let audioContext;
+        try {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        } catch (e) {
+            throw new Error("AudioContext not supported or failed to initialize");
+        }
+        
+        const source = audioContext.createMediaStreamSource(stream);
+        const analyser = audioContext.createAnalyser();
+        source.connect(analyser);
+        
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+        analyser.getByteFrequencyData(dataArray);
+        
+        const hasAudio = dataArray.some(value => value > 0);
+        if (!hasAudio) {
+            console.warn('No audio signal detected. Audio might not be shared.');
+        }
+
+        mediaRecorder = new MediaRecorder(stream, { 
+            mimeType: 'audio/webm',
+            audioBitsPerSecond: 128000
+        });
         
         mediaRecorder.ondataavailable = (event) => {
             if (event.data.size > 0) {
@@ -992,25 +1115,30 @@ async function startAudioCapture() {
             }
         };
 
-        // FIX: Enhanced error handling and stream validation
         mediaRecorder.onstop = async () => {
             if (audioChunks.length > 0) {
-                const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-                audioChunks = [];
-                await processAudioChunk(audioBlob);
+                try {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    audioChunks = [];
+                    await processAudioChunk(audioBlob);
+                } catch (error) {
+                    console.error('Audio processing error:', error);
+                }
             }
             
             if (isMeetingMode) {
                 try {
+                    // Defend against null/inactive mediaRecorder between intervals
                     if (mediaRecorder && mediaRecorder.stream && mediaRecorder.stream.active) {
                         mediaRecorder.start();
+                        const recorder = mediaRecorder; // Capture for closure
                         setTimeout(() => { 
-                            if (mediaRecorder && mediaRecorder.state === 'recording') {
-                                mediaRecorder.stop(); 
+                            if (recorder && recorder.state === 'recording') {
+                                recorder.stop(); 
                             }
                         }, CONFIG.AUDIO_CHUNK_DURATION_MS);
                     } else {
-                        console.error('Stream no longer active, stopping meeting mode');
+                        console.error('Stream no longer active');
                         toggleMeetingMode();
                     }
                 } catch (error) {
@@ -1018,6 +1146,11 @@ async function startAudioCapture() {
                     toggleMeetingMode();
                 }
             }
+        };
+
+        mediaRecorder.onerror = (event) => {
+            console.error('MediaRecorder error:', event.error);
+            toggleMeetingMode();
         };
 
         mediaRecorder.start();
@@ -1043,12 +1176,11 @@ async function startAudioCapture() {
         
         if (stopListeningBtn) stopListeningBtn.classList.add('hidden');
 
-        addMessageToUI('system', "🎙️ Listen Error: Access denied. IMPORTANT: When the capture window appears, you MUST select 'System Audio' or 'Entire Screen' and check the 'Share Audio' box.");
-        console.warn("Failed to start audio capture. Make sure to share 'System Audio'.");
+        showToast(`🎙️ Audio Error: ${err.message}`, 'error');
+        addMessageToUI('system', `🎙️ Listen Error: ${err.name || 'Error'} - ${err.message}. \n\nIMPORTANT: You MUST check the 'Share Audio' box in the screen picker.`);
     }
 }
 
-// FIX: Proper cleanup with null check
 function stopAudioCapture() {
     if (mediaRecorder) {
         if (mediaRecorder.state !== 'inactive') {
@@ -1090,7 +1222,129 @@ async function processAudioChunk(blob) {
     }
 }
 
-// Proper semantic version comparison: returns 1 if a > b, -1 if a < b, 0 if equal
+// ===== TTS =====
+
+function toggleTts() {
+    isTtsEnabled = !isTtsEnabled;
+    const btn = document.getElementById('ttsBtn');
+    if (btn) btn.classList.toggle('active', isTtsEnabled);
+    
+    if (isTtsEnabled) {
+        speakText("Text-to-Speech Activated");
+    } else {
+        window.speechSynthesis.cancel();
+        ttsQueue = [];
+        isSpeaking = false;
+    }
+}
+
+function speakText(text) {
+    if (!window.speechSynthesis) {
+        console.warn('Speech synthesis not available');
+        return;
+    }
+    
+    // Prevent memory leaks with unbounded queue
+    if (ttsQueue.length > 50) {
+        ttsQueue.shift(); // Drop oldest
+    }
+    
+    ttsQueue.push(text);
+    
+    if (!isSpeaking) {
+        processTtsQueue();
+    }
+}
+
+function processTtsQueue() {
+    if (ttsQueue.length === 0) {
+        isSpeaking = false;
+        return;
+    }
+    
+    isSpeaking = true;
+    const text = ttsQueue.shift();
+    
+    const voices = window.speechSynthesis.getVoices();
+    if (voices.length === 0 && !voicesLoaded) {
+        setTimeout(() => processTtsQueue(), 100);
+        ttsQueue.unshift(text);
+        return;
+    }
+    
+    voicesLoaded = true;
+    window.speechSynthesis.cancel();
+    
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = CONFIG.TTS_SPEECH_RATE;
+    utterance.pitch = 1.0;
+    
+    const femaleVoiceKeywords = ['Female', 'Zira', 'Samantha', 'Microsoft Zira', 'Google UK English Female', 'Sara', 'Victoria'];
+    let preferredVoice = voices.find(v => 
+        (v.name.includes('Google') || v.name.includes('Natural')) && 
+        femaleVoiceKeywords.some(kw => v.name.includes(kw))
+    );
+    
+    if (!preferredVoice) {
+        preferredVoice = voices.find(v => femaleVoiceKeywords.some(kw => v.name.includes(kw)));
+    }
+    
+    if (preferredVoice) utterance.voice = preferredVoice;
+    
+    utterance.onend = () => {
+        processTtsQueue();
+    };
+    
+    utterance.onerror = (event) => {
+        console.error('TTS Error:', event);
+        processTtsQueue();
+    };
+    
+    window.speechSynthesis.speak(utterance);
+}
+
+// ===== KEYWORD TICKER =====
+
+function updateKeywordTicker() {
+    const ticker = document.getElementById('tickerBar');
+    if (!ticker) return;
+    
+    if (!USER_JD) {
+        ticker.classList.add('hidden');
+        return;
+    }
+    
+    ticker.classList.remove('hidden');
+    ticker.innerHTML = '';
+    
+    const keywords = extractKeywords(USER_JD);
+    keywords.forEach(word => {
+        const tag = document.createElement('span');
+        tag.className = 'keyword-tag';
+        tag.textContent = word;
+        tag.onclick = () => tag.classList.toggle('dimmed');
+        ticker.appendChild(tag);
+    });
+}
+
+function extractKeywords(text) {
+    const commonWords = new Set(['experience', 'required', 'responsibilities', 'qualifications', 'working', 'skills', 'ability']);
+    const words = text.match(/[A-Z][a-z]+|\b[a-z]{5,}\b/g) || [];
+    
+    const freqMap = {};
+    words.forEach(w => {
+        const lower = w.toLowerCase();
+        if (commonWords.has(lower)) return;
+        freqMap[lower] = (freqMap[lower] || 0) + 1;
+    });
+    
+    return Object.keys(freqMap)
+        .sort((a, b) => freqMap[b] - freqMap[a])
+        .slice(0, 10);
+}
+
+// ===== UPDATES =====
+
 function compareVersions(a, b) {
     const pa = a.replace(/^v/, '').split('.').map(Number);
     const pb = b.replace(/^v/, '').split('.').map(Number);
@@ -1109,164 +1363,369 @@ async function checkForAppUpdates(showFeedback = false) {
         const updateInfo = await window.electronAPI.checkForUpdates();
         
         if (updateInfo.success) {
-            // Semantic version comparison: Only update if remote is strictly newer
             if (compareVersions(updateInfo.version, currentVersion) > 0) {
-            console.log(`Update available: ${updateInfo.version} (Current: ${currentVersion})`);
+                console.log(`Update available: ${updateInfo.version} (Current: ${currentVersion})`);
             
-            // Inject a subtle system message into the chat
-            const updateMessage = document.createElement('div');
-            updateMessage.className = 'message system';
-            updateMessage.innerHTML = `
-                <div class="bubble" style="border: 1px solid var(--accent-color); background: rgba(0, 243, 255, 0.05);">
-                    ✨ <strong>New Update Available (v${updateInfo.version})</strong><br>
-                    <span style="font-size: 0.85em; opacity: 0.8;">Get the latest stealth fixes and one-click updates.</span><br>
-                    <button id="applyUpdateBtn" style="background: var(--accent-color); color: black; border: none; padding: 6px 12px; border-radius: 4px; font-weight: bold; margin-top: 8px; cursor: pointer; font-size: 0.9em; width: 100%;">Update & Restart</button>
-                    <div id="updateStatus" style="font-size: 0.8em; margin-top: 5px; color: var(--accent-color); display: none;">Updating... Please wait.</div>
-                </div>
-            `;
+                const updateMessage = document.createElement('div');
+                updateMessage.className = 'message system';
+                updateMessage.innerHTML = `
+                    <div class="bubble" style="border: 1px solid var(--accent-color); background: rgba(0, 243, 255, 0.05);">
+                        ✨ <strong>New Update Available (v${updateInfo.version})</strong><br>
+                        <span style="font-size: 0.85em; opacity: 0.8;">Get the latest stealth fixes and one-click updates.</span><br>
+                        <button id="applyUpdateBtn" style="background: var(--accent-color); color: black; border: none; padding: 6px 12px; border-radius: 4px; font-weight: bold; margin-top: 8px; cursor: pointer; font-size: 0.9em; width: 100%;">Update & Restart</button>
+                        <div id="updateStatus" style="font-size: 0.8em; margin-top: 5px; color: var(--accent-color); display: none;">Updating... Please wait.</div>
+                    </div>
+                `;
             
-            messagesList.appendChild(updateMessage);
-            scrollToBottom();
+                messagesList.appendChild(updateMessage);
+                scrollToBottom();
             
-            const applyBtn = updateMessage.querySelector('#applyUpdateBtn');
-            const statusDiv = updateMessage.querySelector('#updateStatus');
+                const applyBtn = updateMessage.querySelector('#applyUpdateBtn');
+                const statusDiv = updateMessage.querySelector('#updateStatus');
             
-            if (applyBtn) {
-                const isPatch = !!updateInfo.patch_url;
-                const downloadUrl = updateInfo.patch_url || updateInfo.url;
+                if (applyBtn) {
+                    const isPatch = !!updateInfo.patch_url;
+                    const downloadUrl = updateInfo.patch_url || updateInfo.url;
                 
-                applyBtn.addEventListener('click', async () => {
-                    applyBtn.disabled = true;
-                    applyBtn.style.opacity = '0.5';
-                    applyBtn.innerText = isPatch ? 'Applying Hotfix...' : 'Downloading Core Update...';
-                    statusDiv.innerText = isPatch ? 'Downloading small patch (~50KB)...' : 'Downloading full engine (~300MB)...';
-                    statusDiv.style.display = 'block';
+                    applyBtn.addEventListener('click', async () => {
+                        applyBtn.disabled = true;
+                        applyBtn.style.opacity = '0.5';
+                        applyBtn.innerText = isPatch ? 'Applying Hotfix...' : 'Downloading Core Update...';
+                        statusDiv.innerText = isPatch ? 'Downloading small patch (~50KB)...' : 'Downloading full engine (~300MB)...';
+                        statusDiv.style.display = 'block';
                     
-                    const result = await window.electronAPI.applyUpdate(downloadUrl);
-                    if (!result.success) {
-                        applyBtn.disabled = false;
-                        applyBtn.style.opacity = '1';
-                        applyBtn.innerText = 'Retry Update';
-                        statusDiv.innerText = 'Error: ' + result.error;
-                        statusDiv.style.color = '#ff4b4b';
-                    }
-                });
-            }
+                        const result = await window.electronAPI.applyUpdate(downloadUrl);
+                        if (!result.success) {
+                            applyBtn.disabled = false;
+                            applyBtn.style.opacity = '1';
+                            applyBtn.innerText = 'Retry Update';
+                            statusDiv.innerText = 'Error: ' + result.error;
+                            statusDiv.style.color = '#ff4b4b';
+                        }
+                    });
+                }
             } else if (showFeedback) {
-                alert(`You are on the latest version (v${currentVersion}).`);
+                showToast(`You are on the latest version (v${currentVersion})`, 'success');
             }
         } else if (showFeedback) {
-            alert(`Update check failed: ${updateInfo.error}`);
+            showToast(`Update check failed: ${updateInfo.error}`, 'error');
         }
     } catch (err) {
         console.warn('Silent Update Check failed (Likely offline):', err);
-        if (showFeedback) alert('Update check failed (Offline?)');
+        if (showFeedback) showToast('Update check failed (Offline?)', 'error');
     }
 }
 
-// Final Initialization
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-        init();
-        setupGlobalInterceptors();
-    });
-} else {
-    init();
-    setupGlobalInterceptors();
+// ===== SETTINGS =====
+
+async function handleSaveSettings() {
+    try {
+        const saveBtn = document.getElementById('saveSettings');
+        if (saveBtn) {
+            saveBtn.textContent = "Saving...";
+            saveBtn.disabled = true;
+        }
+
+        const rawKeys = document.getElementById('groqKeyInput').value;
+        const cleanKeys = rawKeys.split(/\r?\n/).map(k => k.trim()).filter(k => k.length > 0).join('\n');
+        const bio = document.getElementById('userBioInput').value.trim();
+        const jd = document.getElementById('userJdInput').value.trim();
+        const projects = document.getElementById('userProjectsInput').value.trim();
+        
+        await window.electronAPI.setSetting('groq-api-key', cleanKeys);
+        await window.electronAPI.setSetting('user-bio', bio);
+        await window.electronAPI.setSetting('user-jd', jd);
+        await window.electronAPI.setSetting('user-projects', projects);
+        await window.electronAPI.setSetting('stored-resumes', storedResumes);
+        await window.electronAPI.setSetting('stored-jds', storedJDs);
+        await window.electronAPI.setSetting('stored-projects', storedProjects);
+        
+        chatHistory = [];
+        saveHistory();
+        renderHistory();
+        await loadSettings();
+        
+        if (saveBtn) {
+            saveBtn.textContent = "✅ Saved!";
+            saveBtn.style.background = "#22c55e";
+        }
+
+        setTimeout(async () => {
+            const settingsModal = document.getElementById('settingsModal');
+            if (settingsModal) settingsModal.classList.add('hidden');
+            if (saveBtn) {
+                saveBtn.textContent = "Save";
+                saveBtn.style.background = "";
+                saveBtn.disabled = false;
+            }
+            if (saveBtn) {
+                saveBtn.textContent = "Save";
+                saveBtn.style.background = "";
+                saveBtn.disabled = false;
+            }
+            // Do NOT force sleep here. Let mousemove interceptor handle natural sleep.
+            isOverlayOpen = false; 
+        }, 1000);
+
+    } catch (err) { 
+        console.error('Save failed:', err); 
+        const saveBtn = document.getElementById('saveSettings');
+        if (saveBtn) {
+            const errMsg = err.code || err.message || "Unknown Error";
+            saveBtn.textContent = `❌ ${errMsg.substring(0, 15)}`;
+            saveBtn.disabled = false;
+        }
+        showToast('Failed to save settings', 'error');
+    }
 }
 
+// ===== UTILITIES =====
+
+function showToast(message, type = 'info') {
+    const container = document.getElementById('toastContainer');
+    if (!container) return;
+
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    
+    let icon = 'ℹ️';
+    if (type === 'success') icon = '✅';
+    if (type === 'error') icon = '❌';
+    
+    // Use textContent for safety, then add icon
+    const iconSpan = document.createElement('span');
+    iconSpan.style.fontSize = '1.2em';
+    iconSpan.textContent = icon;
+    
+    const textSpan = document.createElement('span');
+    textSpan.textContent = message;
+    
+    toast.appendChild(iconSpan);
+    toast.appendChild(textSpan);
+    
+    container.appendChild(toast);
+    
+    setTimeout(() => {
+        if (toast.parentElement) toast.remove();
+    }, 3000);
+}
+
+function cleanupMemory() {
+    if (messagesList.children.length > 100) {
+        const messagesToKeep = 50;
+        while (messagesList.children.length > messagesToKeep) {
+            messagesList.removeChild(messagesList.firstChild);
+        }
+    }
+    
+    if (audioChunks.length > 100) {
+        audioChunks = [];
+    }
+    
+    if (ttsQueue.length > 10) {
+        ttsQueue = ttsQueue.slice(-5);
+    }
+}
+
+async function checkFirstRun() {
+    const hasSeen = await window.electronAPI.getSetting('has-seen-onboarding');
+    if (hasSeen === 'true') return;
+
+    const welcomeDiv = document.createElement('div');
+    welcomeDiv.className = 'bubble';
+    welcomeDiv.style.cssText = 'border: 1px solid var(--accent-blue); background: rgba(59, 130, 246, 0.1);';
+    welcomeDiv.innerHTML = `
+        <h3>👋 Welcome to Ghost AI</h3>
+        <p><strong>Stealth Mode Active:</strong> Clicks will pass through the window unless you hold <code>Ctrl</code> or click a button.</p>
+        <hr style="border-color: var(--border-subtle); margin: 8px 0;">
+        <p><strong>Shortcuts:</strong></p>
+        <ul>
+            <li><code>Up + Down Arrows</code>: Toggle Visibility</li>
+            <li><code>Left + Right Arrows</code>: Capture Screen</li>
+            <li><code>Ctrl + .</code>: Emergency Toggle</li>
+            <li><code>Ctrl + K</code>: Focus Input</li>
+            <li><code>Escape</code>: Close Overlays</li>
+            <li><code>Ctrl + L</code>: Clear Chat</li>
+        </ul>
+        <br>
+        <p><em>Tip: Click the "Focus" counter at the top to reset your limit.</em></p>
+    `;
+    
+    const systemMsg = document.createElement('div');
+    systemMsg.className = 'message system';
+    systemMsg.appendChild(welcomeDiv);
+    messagesList.appendChild(systemMsg);
+    scrollToBottom();
+    
+    await window.electronAPI.setSetting('has-seen-onboarding', 'true');
+}
+
+// ===== GLOBAL INTERCEPTORS =====
+
 function setupGlobalInterceptors() {
-    // Only attach once
     if (window._interceptorsAttached) return;
     window._interceptorsAttached = true;
 
     console.log("Global Interceptors Attached");
 
-    // Dynamic Click-Through Management (Robust Strategy)
-    window.addEventListener('mousemove', (e) => {
+    const debouncedMouseCheck = debounce(async (e) => {
         try {
-            // CRITICAL: If ANY overlay/modal is visible, NEVER ignore mouse events
-            // Otherwise inputs inside modals become unclickable
             const hasVisibleOverlay = document.querySelector('.overlay:not(.hidden)');
+            
+            // SELF-CORRECTING OVERLAY STATE
+            if (!hasVisibleOverlay && isOverlayOpen) {
+                console.log("Overlay state deadlock detected - resetting isOverlayOpen");
+                isOverlayOpen = false;
+            }
+
+            if (isOverlayOpen) return;
+
             if (hasVisibleOverlay) {
-                window.electronAPI.setIgnoreMouseEvents(false);
+                // If overlay is visible, MUST be focusable and clickable
+                if (isIgnoringMouse || !isOverlayOpen) {
+                    window.electronAPI.setIgnoreMouseEvents(false);
+                    // Overlay open: Allow interaction but DO NOT set focusable.
+                    // Just enabling mouse events is enough for clicks to work if window is visible.
+                    isIgnoringMouse = false;
+                    isOverlayOpen = true; // Protect this state
+                }
                 return;
             }
 
-            const interactive = e.target && e.target.closest && e.target.closest('.app-container, .top-bar, button, input, textarea, .input-area, .send-btn, .action-bar, .action-buttons, #chatContainer, #messages, .message, .file-chip, .ocr-line, .keyword-tag, #ghostStatus, .remove-file, .copy-btn, .copy-btn *, .modal-body, .modal-footer, .modal-box, .auth-box, .onboarding-box, .overlay-content, .overlay-actions');
-            if (interactive) {
-                window.electronAPI.setIgnoreMouseEvents(false);
-            } else {
-                window.electronAPI.setIgnoreMouseEvents(true, { forward: true });
+            let target = e.target;
+            // TEXT NODE FIX: If target is text node (3), use parent
+            if (target && target.nodeType === 3) {
+                target = target.parentNode;
             }
-        } catch (err) {}
-    });
+
+            const interactive = target && target.closest && target.closest(
+                '.app-container, .top-bar, button, input, textarea, .input-area, ' +
+                '.send-btn, .action-bar, .action-buttons, #chatContainer, #messages, ' +
+                '.message, .file-chip, .ocr-line, .keyword-tag, #ghostStatus, ' +
+                '.remove-file, .copy-btn, .modal-body, .modal-footer, .modal-box, ' +
+                '.auth-box, .onboarding-box, .overlay-content, .overlay-actions, .overlay'
+            );
+            
+            // Debug: Log hit testing if state seems stuck
+            if (isIgnoringMouse && interactive) {
+                 window.electronAPI.logToMain(`[Interceptor] Waking up. Target: ${e.target.tagName}, Class: ${e.target.className}`);
+            }
+            
+            if (interactive) {
+                if (isIgnoringMouse) {
+                    await window.electronAPI.setIgnoreMouseEvents(false);
+                    // Interceptor Wakeup: Just enable mouse events. DO NOT make focusable.
+                    // Making it focusable (even without focus()) can cause Windows to treat it as "active" 
+                    // or confuse some input methods.
+                    isIgnoringMouse = false;
+                    console.log("[Interceptor] App Woke Up (Interactive)");
+                }
+            } else {
+                if (!isIgnoringMouse) {
+                    await window.electronAPI.setIgnoreMouseEvents(true, { forward: true });
+                    // Only reset focusable if overlay is NOT open
+                    if (!isOverlayOpen) {
+                        await window.electronAPI.setFocusable(false);
+                    }
+                    isIgnoringMouse = true;
+                    console.log("[Interceptor] App Sleeping (Stealth)");
+                }
+            }
+        } catch (err) {
+            console.error('Mouse interceptor error:', err);
+        }
+    }, 16);
+
+    window.addEventListener('mousemove', debouncedMouseCheck, { passive: true });
+
+    let lastGlobalClickTime = 0;
 
     document.addEventListener('mousedown', async (e) => {
-        // ... (Interception Logic)
-        const grabBtn = e.target.closest('#analyseScreenBtn'); 
-        const meetingBtn = e.target.closest('#listenBtn');
-        const answerBtn = e.target.closest('#answerQuestionBtn');
-        const hideButton = e.target.closest('#hideBtn');
-        const exitButton = e.target.closest('#exitBtn');
-        const ghostBtn = e.target.closest('#ghostStatus');
-        const settingsBtn = e.target.closest('#settingsBtn');
-        const uploadResumeBtn = e.target.closest('#uploadResumeBtn');
-        const uploadJdBtn = e.target.closest('#uploadJdBtn');
-        const uploadProjectBtn = e.target.closest('#uploadProjectBtn');
-        const uploadProjectFolderBtn = e.target.closest('#uploadProjectFolderBtn');
-        const closeSettings = e.target.closest('#closeSettings');
-        const saveSettings = e.target.closest('#saveSettings');
-        const onboardingBtn = e.target.closest('#finishOnboarding');
-        const ttsBtn = e.target.closest('#ttsBtn');
-        const ocrBtn = e.target.closest('#sendOcr');
-        const cancelBtn = e.target.closest('#cancelOcr');
-        const ocrLine = e.target.closest('.ocr-line');
-        const resetFocusBtn = e.target.closest('#resetFocusBtn');
-        const isModalInput = e.target.closest('.modal-content, .modal-box') && (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT');
-        const isAuthInput = e.target.closest('.auth-box') && (e.target.tagName === 'INPUT');
-        const isOnboardingInput = e.target.closest('.onboarding-box') && (e.target.tagName === 'INPUT');
-        const isChatInput = e.target === messageInput;
-        const removeFileBtn = e.target.closest('.remove-file');
-        const copyBtn = e.target.closest('.copy-btn');
-        const wipeAllDataBtn = e.target.closest('#wipeAllData');
-        const checkForUpdatesBtn = e.target.closest('#checkForUpdatesBtn');
-        const sendBtn = e.target.closest('#sendButton');
-        const clearChat = e.target.closest('#clearChat');
-        const authSubmitBtn = e.target.closest('#authSubmit');
-        const authToggleBtn = e.target.closest('#authToggleBtn');
+        // GLOBAL DEDUPLICATION: Prevent double-firing (OS + Stealth)
+        const now = Date.now();
+        if (now - lastGlobalClickTime < 150) {
+            console.log('[Debounce] Ignoring duplicate mousedown');
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+        }
+        lastGlobalClickTime = now;
 
-        // Allow focus for all inputs
+        let target = e.target;
+        // TEXT NODE FIX: If target is text node (3), use parent
+        if (target && target.nodeType === 3) {
+            target = target.parentNode;
+        }
+
+        window.electronAPI.logToMain(`[DEBUG] mousedown at: ${e.clientX}, ${e.clientY}, Tag: ${target.tagName}, ID: ${target.id}, Class: ${target.className}`);
+        const grabBtn = target.closest('#analyseScreenBtn'); 
+        const meetingBtn = target.closest('#listenBtn');
+        const answerBtn = target.closest('#answerQuestionBtn');
+        const hideButton = target.closest('#hideBtn');
+        const exitButton = target.closest('#exitBtn');
+        const ghostBtn = target.closest('#ghostStatus');
+        const settingsBtn = target.closest('#settingsBtn');
+        const uploadResumeBtn = target.closest('#uploadResumeBtn');
+        const uploadJdBtn = target.closest('#uploadJdBtn');
+        const uploadProjectBtn = target.closest('#uploadProjectBtn');
+        const uploadProjectFolderBtn = target.closest('#uploadProjectFolderBtn');
+        const closeSettings = target.closest('#closeSettings');
+        const saveSettings = target.closest('#saveSettings');
+        const onboardingBtn = target.closest('#finishOnboarding');
+        const ttsBtn = target.closest('#ttsBtn');
+        const ocrBtn = target.closest('#sendOcr');
+        const cancelBtn = target.closest('#cancelOcr');
+        const ocrLine = target.closest('.ocr-line');
+        const resetFocusBtn = target.closest('#resetFocusBtn');
+        const isModalInput = target.closest('.modal-content, .modal-box') && (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT');
+        const isAuthInput = target.closest('.auth-box') && (target.tagName === 'INPUT');
+        const isOnboardingInput = target.closest('.onboarding-box') && (target.tagName === 'INPUT');
+        const isChatInput = target === messageInput;
+        const removeFileBtn = target.closest('.remove-file');
+        const copyBtn = target.closest('.copy-btn');
+        const wipeAllDataBtn = target.closest('#wipeAllData');
+        const checkForUpdatesBtn = target.closest('#checkForUpdatesBtn');
+        const sendBtn = target.closest('#sendButton');
+        const clearChat = target.closest('#clearChat');
+        const authSubmitBtn = target.closest('#authSubmit');
+        const authToggleBtn = target.closest('#authToggleBtn');
+
         if (isModalInput || isAuthInput || isOnboardingInput || isChatInput) {
-            console.log('Input clicked - forcing focusable');
-            window.electronAPI.setFocusable(true);
+            console.log('Input clicked - forcing focusable AND focus');
+            // TRUE FOCUS: We need keyboard input here
+            window.electronAPI.setFocusable(true, true);
             updateGhostStatus(false);
             
-            // EXPLICIT FOCUS: Ensure the element actually gets keyboard focus
-            const target = e.target.closest('input, textarea');
-            if (target) {
-                setTimeout(() => target.focus(), 10);
+            const t = target.closest('input, textarea');
+            if (t) {
+                setTimeout(() => t.focus(), 50);
             }
             return;
+        } else {
+            // INTERACTIVE ELEMENT CLICK (Buttons, etc.)
+            // Prevent default to STOP focus stealing.
+            // Our logic below runs anyway.
+            e.preventDefault();
         }
 
         const isInteractive = grabBtn || meetingBtn || answerBtn || hideButton || exitButton || ttsBtn || ghostBtn || settingsBtn || uploadResumeBtn || uploadJdBtn || uploadProjectBtn || uploadProjectFolderBtn || closeSettings || saveSettings || onboardingBtn || ocrBtn || cancelBtn || ocrLine || removeFileBtn || copyBtn || resetFocusBtn || wipeAllDataBtn || checkForUpdatesBtn || sendBtn || clearChat || authSubmitBtn || authToggleBtn;
 
         if (isInteractive) {
-            e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
-            
-            // STEALTH: Only release focus if NOT triggered by an upload button
-            // Uploads need the window to remain focusable for the system dialog
-            const isUpload = uploadResumeBtn || uploadJdBtn || uploadProjectBtn || uploadProjectFolderBtn;
-            if (!isUpload && !settingsBtn && !authSubmitBtn && !onboardingBtn && !saveSettings && !sendBtn) {
-                window.electronAPI.releaseFocus();
-                if (e.target.blur) e.target.blur();
-            } else {
-                // For modals/uploads/critical actions, ensure we ARE focusable
-                window.electronAPI.setFocusable(true);
+            // ONLY prevent default (block focus) for main UI buttons.
+            // For OCR Overlay, we NEED standard behavior (selection/interaction).
+            if (!ocrLine && !ocrBtn && !cancelBtn) {
+                e.preventDefault();
             }
+            
+            console.log(`[DEBUG] Interactive Click: ${target.tagName} .${target.className} ID:${target.id}`);
+            
+            // NEW LOGIC: If it's interactive, we STAY AWAKE.
+            // We rely on the mousemove interceptor to put us to sleep if the user moves away.
+            // checks are already done by interceptor waking up. We don't need to force focusable here either.
+            // UNLESS it's an input, which is handled above.
+            isIgnoringMouse = false; // SYNC STATE
 
-            if (ocrLine && !ocrBtn && !cancelBtn) return; // Toggle handled in click
+            if (ocrLine && !ocrBtn && !cancelBtn) { toggleOcrLine(ocrLine); return; }
             if (removeFileBtn) { removeFile(removeFileBtn.dataset.type, parseInt(removeFileBtn.dataset.index)); return; }
             if (copyBtn) {
                 const blockBody = copyBtn.parentElement.querySelector('.block-body');
@@ -1281,20 +1740,11 @@ function setupGlobalInterceptors() {
             if (resetFocusBtn) { resetFocusCounter(); return; }
             if (checkForUpdatesBtn) { checkForAppUpdates(true); return; }
 
-            // Manual Logic Execution
             if (grabBtn) startScreenGrab();
-            if (answerBtn) {
-                window.electronAPI.setFocusable(true);
-                updateGhostStatus(false);
-                messageInput.focus();
-            }
+            if (answerBtn) { window.electronAPI.setFocusable(true, true); updateGhostStatus(false); messageInput.focus(); }
             if (meetingBtn) toggleMeetingMode();
             if (authSubmitBtn) handleAuthSubmit();
-            if (authToggleBtn) {
-                isSignupMode = !isSignupMode;
-                const overlay = document.getElementById('authOverlay');
-                if (overlay) setupAuth(); // Refresh UI
-            }
+            if (authToggleBtn) { isSignupMode = !isSignupMode; setupAuth(); }
             if (ttsBtn) toggleTts();
             if (uploadResumeBtn) handleResumeUpload();
             if (uploadJdBtn) handleJdUpload();
@@ -1302,14 +1752,31 @@ function setupGlobalInterceptors() {
             if (uploadProjectFolderBtn) handleProjectFolderUpload();
             if (hideButton) window.electronAPI.hideWindow();
             if (exitButton) window.electronAPI.quitApp();
-            if (sendBtn) sendMessage();
+            if (sendBtn) {
+                console.log('[DEBUG] Send Button Clicked');
+                sendMessage();
+            }
             if (clearChat) { chatHistory = []; saveHistory(); renderHistory(); }
             if (ghostBtn) { updateGhostStatus(true); messageInput.blur(); }
-            if (settingsBtn) { document.getElementById('settingsModal').classList.remove('hidden'); window.electronAPI.setFocusable(true); }
-            if (closeSettings) { document.getElementById('settingsModal').classList.add('hidden'); window.electronAPI.setFocusable(false); window.electronAPI.releaseFocus(); updateGhostStatus(true); }
-            if (saveSettings) handleSaveSettings(); // Refactored to separate function for cleanliness
-            if (ocrBtn) { sendSelectedOcrText(); }
-            if (cancelBtn) { hideOcrOverlay(); }
+            if (settingsBtn) { 
+                document.getElementById('settingsModal').classList.remove('hidden'); 
+                // Settings Open: Just allow interaction, don't steal focus
+                isOverlayOpen = true; // EXPLICIT OVERLAY STATE
+            }
+            if (closeSettings) { 
+                document.getElementById('settingsModal').classList.add('hidden'); 
+                // Do NOT force sleep. Let mousemove interceptor handle natural sleep.
+                isOverlayOpen = false;
+                // Focus: Don't set true. Just let interceptor handle state.
+            }
+            if (saveSettings) handleSaveSettings();
+            if (ocrBtn) sendSelectedOcrText();
+            if (cancelBtn) { 
+                console.log('Cancel OCR clicked'); 
+                hideOcrOverlay();
+                // Explicitly reset overlay state to allow stealth to resume
+                isOverlayOpen = false;
+            }
             if (onboardingBtn) {
                 const keyInput = document.getElementById('onboardingKeyInput');
                 const key = keyInput ? keyInput.value.trim() : '';
@@ -1341,85 +1808,8 @@ function setupGlobalInterceptors() {
     }, { capture: true });
 }
 
-async function handleSaveSettings() {
-    try {
-        const saveBtn = document.getElementById('saveSettings');
-        if (saveBtn) {
-            saveBtn.textContent = "Saving...";
-            saveBtn.disabled = true;
-        }
+// ===== ERROR HANDLERS =====
 
-        const rawKeys = document.getElementById('groqKeyInput').value;
-        const cleanKeys = rawKeys.split(/\r?\n/).map(k => k.trim()).filter(k => k.length > 0).join('\n');
-        const bio = document.getElementById('userBioInput').value.trim();
-        const jd = document.getElementById('userJdInput').value.trim();
-        const projects = document.getElementById('userProjectsInput').value.trim();
-        
-        // SERIALIZED SAVES: Prevent Windows File Lock Race Conditions
-        await window.electronAPI.setSetting('groq-api-key', cleanKeys);
-        await window.electronAPI.setSetting('user-bio', bio);
-        await window.electronAPI.setSetting('user-jd', jd);
-        await window.electronAPI.setSetting('user-projects', projects);
-        await window.electronAPI.setSetting('stored-resumes', storedResumes);
-        await window.electronAPI.setSetting('stored-jds', storedJDs);
-        await window.electronAPI.setSetting('stored-projects', storedProjects);
-        
-        chatHistory = []; saveHistory(); renderHistory();
-        await loadSettings();
-        
-        if (saveBtn) {
-            saveBtn.textContent = "✅ Saved!";
-            saveBtn.style.background = "#22c55e";
-        }
-
-        setTimeout(() => {
-            document.getElementById('settingsModal').classList.add('hidden');
-            if (saveBtn) {
-                saveBtn.textContent = "Save";
-                saveBtn.style.background = "";
-                saveBtn.disabled = false;
-            }
-            window.electronAPI.setFocusable(false); 
-            window.electronAPI.releaseFocus(); 
-            updateGhostStatus(true);
-        }, 1000);
-
-    } catch (err) { 
-        console.error('Save failed:', err); 
-        const saveBtn = document.getElementById('saveSettings');
-        if (saveBtn) {
-            // Show actual error for debugging (e.g. EPERM)
-            const errMsg = err.code || err.message || "Unknown Error";
-            saveBtn.textContent = `❌ ${errMsg.substring(0, 15)}`;
-            saveBtn.disabled = false;
-        }
-    }
-}
-
-// === UX & VISUAL FEEDBACK UTILITIES ===
-
-function showToast(message, type = 'info') {
-    const container = document.getElementById('toastContainer');
-    if (!container) return;
-
-    const toast = document.createElement('div');
-    toast.className = `toast toast-${type}`;
-    
-    let icon = 'ℹ️';
-    if (type === 'success') icon = '✅';
-    if (type === 'error') icon = '❌';
-    
-    toast.innerHTML = `<span style="font-size: 1.2em;">${icon}</span> <span>${message}</span>`;
-    
-    container.appendChild(toast);
-    
-    // Remove after animation
-    setTimeout(() => {
-        if (toast.parentElement) toast.remove();
-    }, 3000);
-}
-
-// Global Error Handler
 window.onerror = function(message, source, lineno, colno, error) {
     console.error('Global Error:', message, error);
     if (message && message.includes('ResizeObserver')) return;
@@ -1427,31 +1817,62 @@ window.onerror = function(message, source, lineno, colno, error) {
 };
 
 window.addEventListener('unhandledrejection', function(event) {
-    // Optional: showToast(`Async Error: ${event.reason}`, 'error');
+    console.error('Unhandled Promise Rejection:', event.reason);
 });
 
-// Onboarding Logic
-async function checkFirstRun() {
-    const hasSeen = await window.electronAPI.getSetting('has-seen-onboarding');
-    if (hasSeen === 'true') return;
+// ===== ADD STYLES =====
 
-    // Show Welcome Message
-    const welcomeMsg = `
-        <div class="bubble" style="border: 1px solid var(--accent-blue); background: rgba(59, 130, 246, 0.1);">
-            <h3>👋 Welcome to Ghost AI</h3>
-            <p><strong>Stealth Mode Active:</strong> Calls will pass through the window unless you hold <code>Ctrl</code> or click a button.</p>
-            <hr style="border-color: var(--border-subtle); margin: 8px 0;">
-            <p><strong>Shortcuts:</strong></p>
-            <ul>
-                <li><code>Up + Down Arrows</code>: Toggle Visibility</li>
-                <li><code>Left + Right Arrows</code>: Capture Screen</li>
-                <li><code>Ctrl + .</code>: Emergency Toggle</li>
-            </ul>
-            <br>
-            <p><em>Tip: Click the "Focus" counter at the top to reset your limit.</em></p>
-        </div>
-    `;
-    addMessageToUI('system', welcomeMsg);
-    
-    await window.electronAPI.setSetting('has-seen-onboarding', 'true');
+const style = document.createElement('style');
+style.textContent = `
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+.spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid #fff;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    display: inline-block;
+}
+
+#chatContainer {
+    scroll-behavior: smooth;
+}
+
+.message {
+    animation: fadeInUp 0.3s ease-out;
+}
+
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.input-disabled {
+    opacity: 0.5;
+    pointer-events: none;
+}
+`;
+document.head.appendChild(style);
+
+// ===== INITIALIZATION =====
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        init();
+        setupGlobalInterceptors();
+    });
+} else {
+    init();
+    setupGlobalInterceptors();
 }

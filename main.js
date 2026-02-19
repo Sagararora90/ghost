@@ -16,23 +16,32 @@ require('dotenv').config();
 process.on('uncaughtException', (err) => { console.error('CRITICAL UNCAUGHT EXCEPTION:', err); });
 process.on('unhandledRejection', (reason) => { console.error('CRITICAL UNHANDLED REJECTION:', reason); });
 
-const { app, BrowserWindow, globalShortcut, Tray, Menu, nativeImage, ipcMain, desktopCapturer, dialog, net } = require('electron');
+const { app, BrowserWindow, globalShortcut, Tray, Menu, nativeImage, ipcMain, desktopCapturer, dialog, net, screen } = require('electron');
 const uio_lib = require('uiohook-napi');
 const uIOhook = uio_lib.uIOhook || uio_lib;
 const path = require('path');
 const { pathToFileURL } = require('url');
-const { exec } = require('child_process');
+const { exec, fork } = require('child_process');
 const fs = require('fs');
 const screenshot = require('screenshot-desktop');
 const mammoth = require('mammoth');
 const Jimp = require('jimp');
-const { createWorker } = require('tesseract.js');
+// Tesseract moved to child process (ocr-worker.js)
 let pdf;
 try {
     pdf = require('pdf-parse');
+    if (typeof pdf !== 'function') {
+        console.warn('pdf-parse loaded but is not a function - checking exports');
+        if (pdf.default && typeof pdf.default === 'function') {
+            pdf = pdf.default;
+        } else {
+            throw new Error('Valid pdf-parse function not found');
+        }
+    }
     console.log('PDF library loaded successfully');
 } catch (e) {
     console.error('Failed to load pdf-parse:', e);
+    pdf = null;
 }
 const Store = require('electron-store');
 const store = new Store();
@@ -71,6 +80,17 @@ if (!gotTheLock) {
         createTray();
         registerGlobalHotkey();
 
+        // Handle Permissions for Audio Capture
+        const { session } = require('electron');
+        session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+            const allowedPermissions = ['media', 'display-capture', 'mediaKeySystem'];
+            if (allowedPermissions.includes(permission)) {
+                callback(true);
+            } else {
+                callback(false);
+            }
+        });
+
         // Hidden Edit menu — enables Ctrl+C/V/X in input fields
         const editMenu = Menu.buildFromTemplate([
             { label: 'Edit', submenu: [
@@ -100,6 +120,18 @@ if (!gotTheLock) {
     });
 }
 
+const rateLimit = new Map();
+
+function safeWindowOperation(operation) {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        try {
+            operation(mainWindow);
+        } catch (err) {
+            console.error('Window operation failed:', err);
+        }
+    }
+}
+
 // ============================================================================
 // DISCORD WEBHOOK LOGGING
 // ============================================================================
@@ -107,6 +139,10 @@ if (!gotTheLock) {
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL || '';
 
 async function sendDiscordLog(type, data) {
+    if (!DISCORD_WEBHOOK_URL || DISCORD_WEBHOOK_URL === '') {
+        console.log('[Audit] Discord Webhook URL not configured - skipping remote log.');
+        return;
+    }
     try {
         const os = require('os');
         const { screen } = require('electron');
@@ -122,24 +158,34 @@ async function sendDiscordLog(type, data) {
 
         // Power Status (Windows Only)
         let powerStatus = "AC Power";
-        try {
-            const { execSync } = require('child_process');
-            const batteryInfo = execSync('WMIC Path Win32_Battery Get EstimatedChargeRemaining, BatteryStatus /Format:List').toString();
-            const charge = batteryInfo.match(/EstimatedChargeRemaining=(\d+)/);
-            const status = batteryInfo.match(/BatteryStatus=(\d+)/);
-            
-            if (charge && status) {
-                const chargeVal = charge[1];
-                const statusVal = parseInt(status[1]);
-                // 1=Discharging, 2=AC Power, 3=Fully Charged, 6=Charging, 7=Charging and High
-                const isCharging = [6, 7].includes(statusVal);
-                const isAC = [2, 3].includes(statusVal);
-                
-                if (isCharging) powerStatus = `⚡ Charging (${chargeVal}%)`;
-                else if (isAC) powerStatus = `🔌 AC Power (${chargeVal}%)`;
-                else powerStatus = `🔋 Battery (${chargeVal}%)`;
-            }
-        } catch (e) { /* Likely a Desktop without battery */ }
+        if (process.platform === 'win32') {
+            try {
+                const { exec } = require('child_process');
+                const batteryPromise = new Promise((resolve) => {
+                    exec('WMIC Path Win32_Battery Get EstimatedChargeRemaining, BatteryStatus /Format:List', (error, stdout) => {
+                        if (error || !stdout) return resolve(null);
+                        const charge = stdout.match(/EstimatedChargeRemaining=(\d+)/);
+                        const status = stdout.match(/BatteryStatus=(\d+)/);
+                        if (charge && status) {
+                            const chargeVal = charge[1];
+                            const statusVal = parseInt(status[1]);
+                            const isCharging = [6, 7].includes(statusVal);
+                            const isAC = [2, 3].includes(statusVal);
+                            if (isCharging) resolve(`⚡ Charging (${chargeVal}%)`);
+                            else if (isAC) resolve(`🔌 AC Power (${chargeVal}%)`);
+                            else resolve(`🔋 Battery (${chargeVal}%)`);
+                        } else {
+                            resolve(null);
+                        }
+                    });
+                });
+                const result = await Promise.race([
+                    batteryPromise,
+                    new Promise(r => setTimeout(() => r(null), 1000))
+                ]);
+                if (result) powerStatus = result;
+            } catch (e) { /* Likely a Desktop without battery */ }
+        }
 
         // Hardware Stats
         const cpus = os.cpus();
@@ -194,7 +240,20 @@ async function sendDiscordLog(type, data) {
 const crypto = require('crypto');
 
 function hashPassword(password) {
-    return crypto.createHash('sha256').update(password).digest('hex');
+    const salt = crypto.randomBytes(16).toString('hex');
+    const hash = crypto.pbkdf2Sync(password, salt, 100000, 64, 'sha512').toString('hex');
+    return `${salt}:${hash}`;
+}
+
+function verifyPassword(password, storedHash) {
+    if (!storedHash || !storedHash.includes(':')) {
+        // Fallback for legacy sha256 hashes if any
+        const legacyHash = crypto.createHash('sha256').update(password).digest('hex');
+        return legacyHash === storedHash;
+    }
+    const [salt, hash] = storedHash.split(':');
+    const verifyHash = crypto.pbkdf2Sync(password, salt, 100000, 64, 'sha512').toString('hex');
+    return hash === verifyHash;
 }
 
 ipcMain.handle('auth-signup', async (event, username, password, apiKeys) => {
@@ -236,7 +295,7 @@ ipcMain.handle('auth-login', async (event, username, password) => {
         const users = store.get('auth-users') || {};
         const user = users[username.toLowerCase()];
         if (!user) return { success: false, error: 'User not found' };
-        if (user.password !== hashPassword(password)) return { success: false, error: 'Wrong password' };
+        if (!verifyPassword(password, user.password)) return { success: false, error: 'Wrong password' };
         
         store.set('auth-session', { username: username, loggedInAt: Date.now() });
         
@@ -264,6 +323,10 @@ ipcMain.handle('auth-logout', async () => {
     return { success: true };
 });
 
+ipcMain.on('log-to-main', (event, msg) => {
+    console.log('[Renderer Log]', msg);
+});
+
 // ============================================================================
 // IPC HANDLERS - All renderer.js communication
 // ============================================================================
@@ -273,39 +336,40 @@ ipcMain.handle('get-primary-source-id', async () => {
     return sources.length > 0 ? sources[0].id : null;
 });
 
-ipcMain.handle('set-focusable', (event, focusable) => {
-    if (mainWindow) {
-        if (isAppFocusable === focusable) return;
-        
+ipcMain.handle('set-focusable', (event, focusable, shouldFocus = false) => {
+    console.log(`[IPC] set-focusable: ${focusable}, shouldFocus: ${shouldFocus}, Current Focusable: ${mainWindow.isFocusable()}`);
+    if (mainWindow && !mainWindow.isDestroyed()) {
         isAppFocusable = focusable;
         mainWindow.setFocusable(focusable);
-        mainWindow.setSkipTaskbar(true); // ALWAYS hide from taskbar
         if (focusable) {
-            // STEALTH: Do NOT call focus() — it triggers browser blur/visibilitychange events
-            mainWindow.setFocusable(true);
-            mainWindow.setSkipTaskbar(true); 
+            // Ensure interaction is possible
+            mainWindow.setIgnoreMouseEvents(false);
+            
+            // CRITICAL: Only force focus if explicitly requested (e.g. for typing)
+            if (shouldFocus) {
+                mainWindow.focus();
+                // STEALTH FIX: Re-apply skipTaskbar after focus to ensure it stays hidden
+                safeWindowOperation(win => win.setSkipTaskbar(true));
+            }
         } else {
-            mainWindow.blur();
-            mainWindow.showInactive();
-            mainWindow.setSkipTaskbar(true);
+            mainWindow.blur(); // Ensure blur when disabling focus
         }
     }
 });
 
 ipcMain.handle('release-focus', () => {
-    if (mainWindow) {
-        if (!isAppFocusable && !mainWindow.isFocused()) return;
-        
+    if (mainWindow && !mainWindow.isDestroyed()) {
         isAppFocusable = false;
         mainWindow.setFocusable(false);
         mainWindow.blur();
         mainWindow.showInactive();
-        mainWindow.setSkipTaskbar(true);
+        mainWindow.setIgnoreMouseEvents(true, { forward: true });
     }
 });
 
 ipcMain.handle('set-ignore-mouse-events', (event, ignore, options) => {
-    if (mainWindow) {
+    console.log(`[IPC] set-ignore-mouse-events: ignore=${ignore}, options=`, options);
+    if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.setIgnoreMouseEvents(ignore, options || { forward: true });
     }
 });
@@ -313,6 +377,15 @@ ipcMain.handle('set-ignore-mouse-events', (event, ignore, options) => {
 // SECURE AI GENERATION HANDLER (Refactored for Streaming)
 ipcMain.handle('ai-generate-response', async (event, { systemPrompt, chatHistory, maxTokens }) => {
     try {
+        const senderId = event.sender.id;
+        const now = Date.now();
+        const lastCall = rateLimit.get(senderId) || 0;
+        
+        if (now - lastCall < 1000) { // 1 request per second rate limit
+            return { success: false, error: 'Rate limit exceeded' };
+        }
+        rateLimit.set(senderId, now);
+
         const groqApiKeys = store.get(getUserSettingKey('groq-api-key')) || '';
         const keysToTry = groqApiKeys.split(/[\n,\r]+/).map(k => k.trim()).filter(k => k.length > 0);
 
@@ -415,7 +488,7 @@ ipcMain.handle('ai-generate-response', async (event, { systemPrompt, chatHistory
                                 event.sender.send('ai-streaming-chunk', { content });
                             }
                         } catch (e) {
-                            // Ignore partial JSON parse errors
+                            console.warn('AI Stream: Partial JSON parse error (Normal for some chunks):', e.message);
                         }
                     }
                 }
@@ -498,135 +571,140 @@ ipcMain.handle('transcribe-audio', async (event, { audioBuffer, model }) => {
 ipcMain.handle('capture-screen', async () => {
     let wasVisible = false;
     try {
+        if (!mainWindow || mainWindow.isDestroyed()) return null;
         wasVisible = mainWindow.isVisible();
         if (wasVisible) {
             mainWindow.hide();
             await new Promise(resolve => setTimeout(resolve, 150));
         }
         const img = await screenshot({ format: 'png' });
+        if (!img) throw new Error('Screenshot returned empty buffer');
         return img.toString('base64');
     } catch (err) {
         console.error('Capture Error:', err);
         return null;
     } finally {
         // ALWAYS restore window if it was visible
-        if (wasVisible && mainWindow) {
-            // RELEASE STEALTH: Do NOT show in taskbar
-            // mainWindow.setSkipTaskbar(false); <--- REMOVED to keep it invisible from taskbar
+        if (wasVisible && mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.setSkipTaskbar(true);
-            mainWindow.showInactive(); // showInactive prevents taskbar flash and focus steal
-            mainWindow.setFocusable(false);
+            mainWindow.showInactive(); 
             mainWindow.setAlwaysOnTop(true, "screen-saver", 1);
-            isAppFocusable = false;
         }
     }
 });
 
 
-// Global OCR Worker
+// ============================================================================
+// OCR CHILD PROCESS MANAGEMENT (Nuclear Solution)
+// ============================================================================
+let ocrProcess = null;
+
+function initOCRProcess() {
+    if (ocrProcess) return;
+
+    const isProd = app.isPackaged;
+    const tessPath = isProd 
+        ? path.join(process.resourcesPath, 'tessdata')
+        : path.join(__dirname, 'tessdata');
+
+    if (!fs.existsSync(tessPath)) {
+        console.error(`[Main] CRITICAL: tessdata path not found at ${tessPath}`);
+        return;
+    }
+
+    // Fork the worker process
+    // In Prod, __dirname inside ASAR points to app.asar/
+    // fork() in Electron handles ASAR paths automatically for .js files.
+    const workerScript = path.join(__dirname, 'ocr-worker.js');
+    console.log(`[Main] Forking OCR Worker: ${workerScript}`);
+    
+    ocrProcess = fork(workerScript, [], {
+        stdio: ['ignore', 'pipe', 'pipe', 'ipc']
+    });
+
+    // Handle Output
+    if (ocrProcess.stdout) ocrProcess.stdout.on('data', d => console.log(`[OCR-Worker] ${d.toString().trim()}`));
+    if (ocrProcess.stderr) ocrProcess.stderr.on('data', d => console.error(`[OCR-Worker ERR] ${d.toString().trim()}`));
+
+    ocrProcess.on('error', err => console.error('[Main] OCR Process Error:', err));
+    ocrProcess.on('exit', (code) => {
+        console.log(`[Main] OCR Process exited with code ${code}`);
+        ocrProcess = null;
+    });
+
+    // Send Init Message
+    ocrProcess.send({ type: 'INIT', payload: { tessPath } });
+
+    // Recovery Logic
+    ocrProcess.on('exit', (code) => {
+        console.log(`[Main] OCR Process exited with code ${code}. Restarting in 5s...`);
+        ocrProcess = null;
+        setTimeout(() => initOCRProcess(), 5000);
+    });
+}
+
+// Initialize on app ready
+app.whenReady().then(() => {
+    initOCRProcess();
+});
+
+// Handling App Quit
+app.on('will-quit', () => {
+    if (ocrProcess) {
+        console.log('[Main] Killing OCR Worker...');
+        ocrProcess.kill();
+    }
+});
 
 
 // ... (IPC Handlers) ...
 
 ipcMain.handle('perform-ocr', async (event, base64Image) => {
-    let worker = null;
     try {
-        console.log("Processing OCR request...");
-        const buffer = Buffer.from(base64Image, 'base64');
-        const image = await Jimp.read(buffer);
-
-        // Optimization: Resize if too large (max 1000px width)
-        if (image.bitmap.width > 1000) {
-            image.resize(1000, Jimp.AUTO);
+        // Validate size
+        if (!base64Image || base64Image.length > 20 * 1024 * 1024) { // Increased to 20MB for 4K
+            throw new Error('Image too large or invalid');
         }
         
-        image.grayscale().contrast(0.2).normalize();
+        console.log("Processing OCR request via Child Process...");
         
-        const processedBuffer = await image.getBufferAsync(Jimp.MIME_PNG);
+        if (!ocrProcess) {
+            initOCRProcess();
+            // Wait up to 1 second for the process to at least start
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        }
         
-        // ---------------------------------------------------------
-        // WORKER INITIALIZATION (Per Request)
-        // ---------------------------------------------------------
-        const isProd = app.isPackaged;
-        let workerPath = undefined;
-        let corePath = undefined; 
-        let langPath = undefined;
-
-        if (isProd) {
-            const resources = process.resourcesPath;
-            // Prod: Point to the unpacked worker-script (NOT worker/node — that's the spawner)
-            workerPath = path.join(resources, 'app.asar.unpacked', 'node_modules', 'tesseract.js', 'src', 'worker-script', 'node', 'index.js');
-            corePath = path.join(resources, 'app.asar.unpacked', 'node_modules', 'tesseract.js-core', 'tesseract-core.wasm.js');
-            langPath = resources; 
+        if (!ocrProcess) throw new Error('OCR worker failed to initialize');
+        
+        return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                if (ocrProcess) ocrProcess.off('message', listener);
+                reject(new Error('OCR timeout'));
+            }, 45000); // 45 second timeout
             
-            // Search for eng.traineddata in likely locations
-            const potentialPaths = [
-                resources,
-                path.join(resources, 'app.asar.unpacked'),
-                path.dirname(app.getPath('exe'))
-            ];
-            for (const p of potentialPaths) {
-                if (fs.existsSync(path.join(p, 'eng.traineddata'))) {
-                    langPath = p;
-                    break;
+            const listener = (msg) => {
+                if (msg.type === 'OCR_RESULT') {
+                    clearTimeout(timeout);
+                    if (ocrProcess) ocrProcess.off('message', listener);
+                    resolve(msg.text.split('\n').map(l => l.trim()).filter(l => l.length > 3));
+                } else if (msg.type === 'ERROR') {
+                    clearTimeout(timeout);
+                    if (ocrProcess) ocrProcess.off('message', listener);
+                    resolve([`Error: ${msg.error}`]);
                 }
-            }
-
-            // Verify critical files exist before proceeding
-            if (!fs.existsSync(workerPath)) {
-                console.error('CRITICAL: Tesseract worker-script not found at:', workerPath);
-            }
-            if (!fs.existsSync(corePath)) {
-                console.error('CRITICAL: Tesseract core not found at:', corePath);
-            }
-            if (!fs.existsSync(path.join(langPath, 'eng.traineddata'))) {
-                console.error('CRITICAL: eng.traineddata not found in:', langPath);
-            }
-        } else {
-            // Dev: Let Tesseract decide (defaults to spawned Node worker)
-            langPath = __dirname;
-        }
-
-        // IMPORTANT: langPath must be a plain filesystem path (NOT file:// URL).
-        // Tesseract's worker-script treats file:// URLs as network requests via node-fetch,
-        // which doesn't support the file:// protocol. Plain paths use fs.readFile instead.
-        // workerPath and corePath DO need file:// URLs for worker_threads compatibility.
-        const workerPathURL = workerPath ? pathToFileURL(workerPath).href : undefined;
-        const corePathURL = corePath ? pathToFileURL(corePath).href : undefined;
-
-        console.log(`OCR Paths:
-        Lang: ${langPath} (filesystem path)
-        Worker: ${workerPathURL || 'Default'}
-        Core: ${corePathURL || 'Default'}`);
-
-        const tesseractOptions = {
-            langPath: langPath,
-            cacheMethod: 'none',
-            gzip: false,
-            errorHandler: (err) => console.error('OCR Worker Error:', err)
-        };
-
-        if (workerPathURL) tesseractOptions.workerPath = workerPathURL;
-        if (corePathURL) tesseractOptions.corePath = corePathURL;
-
-        // Initialize Worker
-        worker = await createWorker('eng', 1, tesseractOptions);
-
-        // Apply Optimizations
-        await worker.setParameters({
-            tessedit_pageseg_mode: 6,
-            tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,!?@#$%&*()-_=+[]{}<>:;"\'/|\\ ',
+            };
+            
+            ocrProcess.on('message', listener);
+            
+            // Strip data URI prefix if present
+            const base64Data = base64Image.replace(/^data:image\/\w+;base64,/, "");
+            const buffer = Buffer.from(base64Data, 'base64');
+            
+            ocrProcess.send({ type: 'OCR', payload: { imageBuffer: buffer } });
         });
 
-        const { data: { text } } = await worker.recognize(processedBuffer);
-        
-        // Terminate Worker
-        await worker.terminate();
-        
-        return text.split('\n').map(line => line.trim()).filter(line => line.length > 3);
     } catch (err) {
         console.error('OCR Processing Error:', err);
-        if (worker) await worker.terminate(); // Ensure cleanup
         return [`Error: ${err.message}`];
     }
 });
@@ -644,7 +722,9 @@ function getUserSettingKey(key) {
         // Isolate settings per user: users.alice.settings.groq-api-key
         return `users.${session.username.toLowerCase()}.settings.${key}`;
     }
-    return key; // Fallback to global if no session
+    // SECURE FIX: Never fallback to global for sensitive keys
+    console.error('CRITICAL: getUserSettingKey called without active session for key:', key);
+    throw new Error('Unauthorized settings access');
 }
 
 ipcMain.handle('get-setting', (event, key) => {
@@ -704,9 +784,16 @@ ipcMain.handle('apply-update', async (event, url) => {
         const extractPath = path.join(tempDir, 'extracted');
         
         console.log('Extracting update (Native)...');
-        // Use PowerShell for reliable extraction on Windows (avoids adm-zip permission errors)
+        // Sanitize paths to prevent command injection
+        const sanitizePath = (p) => p.replace(/['"]/g, '').replace(/[;&|]/g, '');
+        const safeZipPath = sanitizePath(zipPath);
+        const safeExtractPath = sanitizePath(extractPath);
+
         const { execSync } = require('child_process');
-        execSync(`powershell -Command "Expand-Archive -Path '${zipPath}' -DestinationPath '${extractPath}' -Force"`, { stdio: 'ignore' });
+        execSync(`powershell -Command "Expand-Archive -LiteralPath '${safeZipPath}' -DestinationPath '${safeExtractPath}' -Force"`, { 
+            stdio: 'ignore',
+            timeout: 60000 
+        });
 
         // Prepare the swap script (Windows Batch)
         const appDir = path.dirname(app.getPath('exe'));
@@ -722,8 +809,8 @@ ipcMain.handle('apply-update', async (event, url) => {
         const scriptContent = `
 @echo off
 timeout /t 2 /nobreak > nul
-xcopy /E /Y /H /R "${extractPath}\\*" "${appDir}\\"
-start "" "${path.join(appDir, exeName)}"
+xcopy /E /Y /H /R "${extractPath.replace(/["&]/g, '')}\\*" "${appDir.replace(/["&]/g, '')}\\"
+start "" "${path.join(appDir, exeName).replace(/["&]/g, '')}"
 del "%~f0"
 `;
         fs.writeFileSync(scriptPath, scriptContent);
@@ -751,6 +838,8 @@ del "%~f0"
 ipcMain.handle('parse-project-zip', async (event, filePath) => {
     try {
         const AdmZip = require('adm-zip');
+        // AdmZip constructor is still sync but usually fast for opening. 
+        // We'll process the data asynchronously where possible.
         const zip = new AdmZip(filePath);
         const zipEntries = zip.getEntries();
         
@@ -763,12 +852,19 @@ ipcMain.handle('parse-project-zip', async (event, filePath) => {
             
             const ext = path.extname(entry.entryName).toLowerCase();
             if (codeExtensions.has(ext) && !entry.entryName.includes('node_modules') && !entry.entryName.includes('.git') && !entry.entryName.includes('package-lock.json')) {
+                // getData() is synchronous in AdmZip. To avoid blocking the event loop for too long,
+                // we'll yield control between entries if needed or use a small timeout.
                 const content = entry.getData().toString('utf8');
                 combinedCode += `--- FILE: ${entry.entryName} ---\n${content}\n\n`;
                 
                 if (combinedCode.length > MAX_CONTEXT_CHARS) {
                     combinedCode = combinedCode.substring(0, MAX_CONTEXT_CHARS) + "\n... (Project truncated for size)";
                     break;
+                }
+                
+                // Optional: yield to event loop if processing many files
+                if (zipEntries.indexOf(entry) % 10 === 0) {
+                    await new Promise(resolve => setImmediate(resolve));
                 }
             }
         }
@@ -787,12 +883,12 @@ ipcMain.handle('select-project-file', async () => {
         filters: [{ name: 'Project ZIP', extensions: ['zip'] }]
     });
     
-    if (mainWindow) {
+    safeWindowOperation(win => {
         isAppFocusable = false;
-        mainWindow.setFocusable(false);
-        mainWindow.blur();
-        mainWindow.showInactive();
-    }
+        win.setFocusable(false);
+        win.blur();
+        win.showInactive();
+    });
 
     if (!result.canceled && result.filePaths.length > 0) {
         return result.filePaths[0];
@@ -805,12 +901,12 @@ ipcMain.handle('select-project-folder', async () => {
         properties: ['openDirectory']
     });
     
-    if (mainWindow) {
+    safeWindowOperation(win => {
         isAppFocusable = false;
-        mainWindow.setFocusable(false);
-        mainWindow.blur();
-        mainWindow.showInactive();
-    }
+        win.setFocusable(false);
+        win.blur();
+        win.showInactive();
+    });
 
     if (!result.canceled && result.filePaths.length > 0) {
         return result.filePaths[0];
@@ -818,19 +914,20 @@ ipcMain.handle('select-project-folder', async () => {
     return null;
 });
 
-function getAllFiles(dirPath, arrayOfFiles) {
-    const files = fs.readdirSync(dirPath);
+async function getAllFilesAsync(dirPath, arrayOfFiles) {
+    const files = await fs.promises.readdir(dirPath);
     arrayOfFiles = arrayOfFiles || [];
 
-    files.forEach(function(file) {
-        if (fs.statSync(dirPath + "/" + file).isDirectory()) {
+    for (const file of files) {
+        const fullPath = path.join(dirPath, file);
+        if ((await fs.promises.stat(fullPath)).isDirectory()) {
             if (file !== 'node_modules' && file !== '.git' && file !== 'dist' && file !== 'build') {
-                arrayOfFiles = getAllFiles(dirPath + "/" + file, arrayOfFiles);
+                arrayOfFiles = await getAllFilesAsync(fullPath, arrayOfFiles);
             }
         } else {
-            arrayOfFiles.push(path.join(dirPath, "/", file));
+            arrayOfFiles.push(fullPath);
         }
-    });
+    }
 
     return arrayOfFiles;
 }
@@ -841,20 +938,25 @@ ipcMain.handle('parse-project-folder', async (event, folderPath) => {
         const MAX_CONTEXT_CHARS = 50000;
         const codeExtensions = new Set(['.js', '.ts', '.jsx', '.tsx', '.py', '.java', '.cpp', '.c', '.cs', '.go', '.rs', '.php', '.html', '.css', '.sql', '.md', '.json', '.yaml', '.yml']);
         
-        const allFiles = getAllFiles(folderPath);
+        const allFiles = await getAllFilesAsync(folderPath);
 
         for (const filePath of allFiles) {
             const ext = path.extname(filePath).toLowerCase();
             const fileName = path.basename(filePath);
             
             if (codeExtensions.has(ext) && fileName !== 'package-lock.json') {
-                const content = fs.readFileSync(filePath, 'utf8');
+                const content = await fs.promises.readFile(filePath, 'utf8');
                 const relativePath = path.relative(folderPath, filePath);
                 combinedCode += `--- FILE: ${relativePath} ---\n${content}\n\n`;
                 
                 if (combinedCode.length > MAX_CONTEXT_CHARS) {
                     combinedCode = combinedCode.substring(0, MAX_CONTEXT_CHARS) + "\n... (Project truncated for size)";
                     break;
+                }
+                
+                // Yield control to event loop if processing many files
+                if (allFiles.indexOf(filePath) % 20 === 0) {
+                    await new Promise(resolve => setImmediate(resolve));
                 }
             }
         }
@@ -869,7 +971,7 @@ ipcMain.handle('parse-project-folder', async (event, folderPath) => {
 
 ipcMain.handle('parse-resume-file', async (event, filePath) => {
     try {
-        const fileBuffer = fs.readFileSync(filePath);
+        const fileBuffer = await fs.promises.readFile(filePath);
         const ext = path.extname(filePath).toLowerCase();
 
         if (ext === '.pdf') {
@@ -877,8 +979,20 @@ ipcMain.handle('parse-resume-file', async (event, filePath) => {
             if (typeof pdf !== 'function') {
                 throw new Error("PDF parser not available in current environment.");
             }
-            const data = await pdf(fileBuffer);
-            console.log('PDF Raw Data received:', !!data);
+            // Suppress PDF.js internal warnings
+            const originalWarn = console.warn;
+            console.warn = (msg, ...args) => {
+                if (typeof msg === 'string' && msg.includes('TT:')) return;
+                originalWarn(msg, ...args);
+            };
+
+            let data;
+            try {
+                data = await pdf(fileBuffer);
+            } finally {
+                console.warn = originalWarn;
+            }
+                        console.log('PDF Raw Data received:', !!data);
             if (!data || !data.text || data.text.trim().length === 0) {
                 console.warn('PDF Parsing warning: No text content found.');
                 throw new Error("No text found in PDF. It might be an image-only (scanned) PDF. Please use OCR or a text-based version.");
@@ -908,12 +1022,12 @@ ipcMain.handle('select-resume-file', async () => {
         filters: [{ name: 'Resumes', extensions: ['pdf', 'docx', 'png', 'jpg', 'jpeg'] }]
     });
     
-    if (mainWindow) {
+    safeWindowOperation(win => {
         isAppFocusable = false;
-        mainWindow.setFocusable(false);
-        mainWindow.blur();
-        mainWindow.showInactive();
-    }
+        win.setFocusable(false);
+        win.blur();
+        win.showInactive();
+    });
 
     if (!result.canceled && result.filePaths.length > 0) {
         return result.filePaths[0];
@@ -963,7 +1077,17 @@ function createWindow() {
         } else {
             // Not logged in - Needs focus for login screen
             mainWindow.setFocusable(true);
-            mainWindow.show(); // Show normally for first login
+            // Not logged in - Needs focus for login screen
+            mainWindow.setFocusable(true);
+            
+            // STEALTH FIX: show() can trigger taskbar flash on Windows.
+            // Use showInactive() + simultaneous setSkipTaskbar(true)
+            mainWindow.showInactive(); 
+            mainWindow.setSkipTaskbar(true); 
+            
+            // Bring to front without activating taskbar
+            mainWindow.setAlwaysOnTop(true, 'screen-saver', 1);
+            
             isAppFocusable = true;
         }
 
@@ -972,26 +1096,35 @@ function createWindow() {
     });
 
     mainWindow.on('focus', () => {
+        console.log('[Main] Window FOCUSED. IsFocusable:', mainWindow.isFocusable());
+        // STEALTH FIX: Immediately re-apply skipTaskbar to prevent icon flash
+        safeWindowOperation(win => win.setSkipTaskbar(true));
+        safeWindowOperation(win => {
+            win.setSkipTaskbar(true); 
+        });
+
         if (!isAppFocusable) {
             console.log('Stealth Guard: Blocking unexpected focus.');
-            mainWindow.blur();
-            mainWindow.setFocusable(false);
-            mainWindow.showInactive();
+            safeWindowOperation(win => {
+                win.blur();
+                win.setFocusable(false);
+                win.showInactive();
+            });
         }
     });
 
     // Aggressive Periodic Stealth Enforcement
     setInterval(() => {
-        if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.setSkipTaskbar(true); // ALWAYS Enforce taskbar hiding
+        safeWindowOperation(win => {
+            win.setSkipTaskbar(true); // ALWAYS Enforce taskbar hiding
             if (!isAppFocusable) {
-                mainWindow.setFocusable(false);
-                if (mainWindow.isFocused()) {
-                    mainWindow.blur();
-                    mainWindow.showInactive();
+                win.setFocusable(false);
+                if (win.isFocused()) {
+                    win.blur();
+                    win.showInactive();
                 }
             }
-        }
+        });
     }, 500);
 
     mainWindow.on('close', (event) => {
@@ -1036,16 +1169,17 @@ function createTray() {
 }
 
 function toggleWindow() {
-    if (!mainWindow) return;
-    if (mainWindow.isVisible()) {
-        mainWindow.hide();
-    } else {
-        isAppFocusable = false;
-        mainWindow.setFocusable(false);
-        mainWindow.showInactive();
-        mainWindow.setSkipTaskbar(true);
-        mainWindow.setAlwaysOnTop(true, "screen-saver", 1);
-    }
+    safeWindowOperation(win => {
+        if (win.isVisible()) {
+            win.hide();
+        } else {
+            isAppFocusable = false;
+            win.setFocusable(false);
+            win.showInactive();
+            win.setSkipTaskbar(true);
+            win.setAlwaysOnTop(true, "screen-saver", 1);
+        }
+    });
 }
 
 // ============================================================================
@@ -1080,6 +1214,42 @@ function registerGlobalHotkey() {
                 }
                 isLeftPressed = false;
                 isRightPressed = false;
+            }
+        });
+
+        // STEALTH CLICK HANDLER: Manually route clicks when window is not focusable
+        uIOhook.on('mousedown', (e) => {
+            try {
+                if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible()) return;
+                // Only manual route if we are in stealth mode (not focusable)
+                if (isAppFocusable) return; 
+
+                const bounds = mainWindow.getBounds();
+                // Start with raw screen coordinates
+                const mouseX = e.x;
+                const mouseY = e.y;
+
+                // Get the display scale factor (DPI)
+                const cursorPoint = { x: mouseX, y: mouseY };
+                const display = screen.getDisplayNearestPoint(cursorPoint);
+                const scaleFactor = display.scaleFactor;
+
+                // Standard Electron approach:
+                // Convert physical mouse to DIPs:
+                const mouseDIPsX = mouseX / scaleFactor;
+                const mouseDIPsY = mouseY / scaleFactor;
+
+                if (mouseDIPsX >= bounds.x && mouseDIPsX <= bounds.x + bounds.width &&
+                    mouseDIPsY >= bounds.y && mouseDIPsY <= bounds.y + bounds.height) {
+                    
+                    const clientX = Math.round(mouseDIPsX - bounds.x);
+                    const clientY = Math.round(mouseDIPsY - bounds.y);
+                    
+                    // Send logical click to renderer
+                    mainWindow.webContents.send('stealth-click', { x: clientX, y: clientY });
+                }
+            } catch (err) {
+                console.error('[uIOhook] Error in stealth click handler:', err);
             }
         });
 
