@@ -12,14 +12,14 @@ global.ImageData = class ImageData {
   }
 };
 global.Path2D = class Path2D {};
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 process.on('uncaughtException', (err) => { console.error('CRITICAL UNCAUGHT EXCEPTION:', err); });
 process.on('unhandledRejection', (reason) => { console.error('CRITICAL UNHANDLED REJECTION:', reason); });
 
 const { app, BrowserWindow, globalShortcut, Tray, Menu, nativeImage, ipcMain, desktopCapturer, dialog, net, screen } = require('electron');
 const uio_lib = require('uiohook-napi');
 const uIOhook = uio_lib.uIOhook || uio_lib;
-const path = require('path');
 const { pathToFileURL } = require('url');
 const { exec, fork } = require('child_process');
 const fs = require('fs');
