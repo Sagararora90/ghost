@@ -571,18 +571,22 @@ ipcMain.handle('transcribe-audio', async (event, { audioBuffer, model }) => {
 ipcMain.handle('capture-screen', async () => {
     let wasVisible = false;
     try {
-        if (!mainWindow || mainWindow.isDestroyed()) return null;
+        if (!mainWindow || mainWindow.isDestroyed()) return { success: false, error: 'Main window not found' };
         wasVisible = mainWindow.isVisible();
         if (wasVisible) {
             mainWindow.hide();
-            await new Promise(resolve => setTimeout(resolve, 150));
+            await new Promise(resolve => setTimeout(resolve, 200)); // Increased wait slightly for slow systems
         }
+        
+        console.log('[Main] Taking screenshot...');
         const img = await screenshot({ format: 'png' });
-        if (!img) throw new Error('Screenshot returned empty buffer');
-        return img.toString('base64');
+        
+        if (!img) throw new Error('Screenshot library returned empty buffer');
+        
+        return { success: true, data: img.toString('base64') };
     } catch (err) {
         console.error('Capture Error:', err);
-        return null;
+        return { success: false, error: err.message || 'Unknown capture error' };
     } finally {
         // ALWAYS restore window if it was visible
         if (wasVisible && mainWindow && !mainWindow.isDestroyed()) {

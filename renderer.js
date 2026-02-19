@@ -640,11 +640,14 @@ async function startScreenGrab() {
         // Ensure interactive state BEFORE we potentially lose it during capture
         isOverlayOpen = true; 
         
-        const base64Image = await window.electronAPI.captureScreen();
+        const result = await window.electronAPI.captureScreen();
         
-        if (!base64Image) {
-            throw new Error('Failed to capture screen');
+        if (!result || !result.success) {
+            const errorMsg = result ? result.error : 'Capture service unavailable';
+            throw new Error(errorMsg);
         }
+
+        const base64Image = result.data;
 
         await showOcrOverlay(true);
         
