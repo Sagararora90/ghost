@@ -755,6 +755,14 @@ ipcMain.handle('open-external', async (event, url) => {
     await shell.openExternal(url);
 });
 
+// Manual Window Dragging Fallback
+ipcMain.on('window-move', (event, { x, y }) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        const bounds = mainWindow.getBounds();
+        mainWindow.setPosition(bounds.x + x, bounds.y + y);
+    }
+});
+
 
 
 ipcMain.handle('check-for-updates', async () => {
@@ -1047,6 +1055,8 @@ function createWindow() {
     mainWindow = new BrowserWindow({
         width: 600, // Increased width for better readability
         height: 600,
+        x: 0,
+        y: 0,
         resizable: false,
         frame: false,
         transparent: true, 

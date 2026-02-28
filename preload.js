@@ -205,5 +205,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
     // Window Controls
     hideWindow: () => ipcRenderer.send('hide-window'),
-    quitApp: () => ipcRenderer.send('quit-app')
+    quitApp: () => ipcRenderer.send('quit-app'),
+    windowMove: (x, y) => ipcRenderer.send('window-move', { x, y })
 });

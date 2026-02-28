@@ -27,12 +27,12 @@
                 </div>
             </div>
             <div class="header-right">
-                <button id="settingsBtn" class="icon-btn" title="Settings">
+                <button id="settingsBtn" class="icon-btn">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
                 </button>
                 <div class="window-controls">
-                    <button id="hideBtn" class="control-btn" title="Minimize">_</button>
-                    <button id="exitBtn" class="control-btn exit" title="Close">✕</button>
+                    <button id="hideBtn" class="control-btn">_</button>
+                    <button id="exitBtn" class="control-btn exit">✕</button>
                 </div>
             </div>
         </header>
@@ -66,10 +66,10 @@
                 <div class="card-header">
                     <span class="card-title">✨ AI Analysis</span>
                     <div class="card-actions">
-                        <button id="copyAnswerBtn" class="icon-btn copy-btn" title="Copy to Clipboard">
+                        <button id="copyAnswerBtn" class="icon-btn copy-btn">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
                         </button>
-                        <button id="toggleExpandBtn" class="icon-btn" title="Expand / Concise">
+                        <button id="toggleExpandBtn" class="icon-btn">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>
                         </button>
                     </div>
@@ -216,6 +216,7 @@
 
     <div id="toastContainer" class="ghost-toasts"></div>
 
+    <script src="node_modules/marked/lib/marked.umd.js"></script>
     <script src="renderer.js"></script>
     <script>
         // Inline UI logic for tabs, expand, etc.

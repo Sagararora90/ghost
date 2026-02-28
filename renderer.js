@@ -85,6 +85,12 @@ function debounce(func, wait) {
 
 function parseMarkdown(text) {
     if (!text) return '';
+    if (typeof marked !== 'undefined') {
+        return marked.parse(text, { breaks: true });
+    }
+    console.warn('marked is undefined, falling back to manual parse');
+    
+    // Fallback if marked is somehow not loaded
     let html = text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
     html = html.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code class="language-$1">$2</code></pre>');
     html = html.replace(/```(\w*)\n([\s\S]*)$/g, '<pre><code class="language-$1">$2</code></pre>');
@@ -340,6 +346,37 @@ function setupEventListeners() {
     if (exitBtn) exitBtn.addEventListener('click', () => {
          window.electronAPI.quitApp();
     });
+
+    // Custom Drag Logic for Frameless Window
+    const header = document.querySelector('.ghost-header');
+    if (header && window.electronAPI.windowMove) {
+        let isDragging = false;
+        let lastX = 0;
+        let lastY = 0;
+        
+        header.addEventListener('mousedown', (e) => {
+            if (e.button !== 0 || e.target.closest('.header-right') || e.target.closest('.mode-tabs')) return;
+            isDragging = true;
+            lastX = e.screenX;
+            lastY = e.screenY;
+            if (e.target.setCapture) e.target.setCapture();
+        });
+        
+        document.addEventListener('mousemove', (e) => {
+            if (isDragging) {
+                const deltaX = e.screenX - lastX;
+                const deltaY = e.screenY - lastY;
+                lastX = e.screenX;
+                lastY = e.screenY;
+                window.electronAPI.windowMove(deltaX, deltaY);
+            }
+        });
+        
+        document.addEventListener('mouseup', () => {
+            isDragging = false;
+            if (document.releaseCapture) document.releaseCapture();
+        });
+    }
 
     const fc = document.getElementById('focusCounter');
     if (fc) {
@@ -928,6 +965,7 @@ ${fullJD || 'No JD provided.'}
    - Give direct, short answers.
    - Do NOT stammer or use "umm" too much. Just speak plainly.
    - DO NOT sound like a robot. Sound like a normal student.
+   - FORMATTING: You must use proper markdown with LINE BREAKS for readability. Always put code blocks on new lines with language tags. Do not write everything in one single paragraph.
 6. Identity: Use the name/details from the BIO. If none, assume a common Indian name if asked.
 
 THE INTERVIEWER IS TALKING TO ME NOW:`;
@@ -946,7 +984,7 @@ THE INTERVIEWER IS TALKING TO ME NOW:`;
         setLoading(false);
         
         if (result.success) {
-            activeStreamingBody.textContent = result.content;
+            activeStreamingBody.innerHTML = parseMarkdown(result.content);
             chatHistory.push({ role: 'assistant', content: result.content });
             saveHistory();
 
@@ -1139,20 +1177,26 @@ async function startAudioCapture() {
         
         const stream = await navigator.mediaDevices.getUserMedia({
             audio: {
-                chromeMediaSource: 'desktop',
-                chromeMediaSourceId: sourceId
+                mandatory: {
+                    chromeMediaSource: 'desktop'
+                }
             },
             video: {
-                chromeMediaSource: 'desktop',
-                chromeMediaSourceId: sourceId,
-                maxWidth: 1,
-                maxHeight: 1
+                mandatory: {
+                    chromeMediaSource: 'desktop',
+                    chromeMediaSourceId: sourceId,
+                    maxWidth: 1,
+                    maxHeight: 1
+                }
             }
         });
         
         window.electronAPI.logToMain(`[Audio] Stream obtained successfully`);
 
-        stream.getVideoTracks().forEach(track => track.stop());
+        stream.getVideoTracks().forEach(track => {
+            track.stop();
+            stream.removeTrack(track);
+        });
         
         const audioTracks = stream.getAudioTracks();
         console.log("Audio Tracks captured:", audioTracks.length);
