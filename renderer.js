@@ -41,6 +41,9 @@ const ocrLinesContainer = document.getElementById('ocrLines');
 const cancelOcrBtn = document.getElementById('cancelOcr');
 const sendOcrBtn = document.getElementById('sendOcr');
 const listeningIndicator = document.getElementById('listeningIndicator');
+const waveform = document.getElementById('waveform');
+const statusDot = document.querySelector('.status-dot');
+const ghostStatusText = document.getElementById('ghostStatusText');
 
 // Chat State
 let chatHistory = [];
@@ -78,6 +81,22 @@ function debounce(func, wait) {
         clearTimeout(timeout);
         timeout = setTimeout(later, wait);
     };
+}
+
+function parseMarkdown(text) {
+    if (!text) return '';
+    let html = text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    html = html.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code class="language-$1">$2</code></pre>');
+    html = html.replace(/```(\w*)\n([\s\S]*)$/g, '<pre><code class="language-$1">$2</code></pre>');
+    html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+    html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    const parts = html.split(/(<pre>[\s\S]*?<\/pre>)/g);
+    for (let i = 0; i < parts.length; i++) {
+        if (!parts[i].startsWith('<pre>')) {
+            parts[i] = parts[i].replace(/\n/g, '<br>');
+        }
+    }
+    return parts.join('');
 }
 
 // ===== AUTH SYSTEM =====
@@ -189,7 +208,7 @@ async function init() {
     window.electronAPI.onAiStreamingChunk((data) => {
         if (activeStreamingBody) {
             activeAccumulator += data.content;
-            activeStreamingBody.textContent = activeAccumulator;
+            activeStreamingBody.innerHTML = parseMarkdown(activeAccumulator);
             scrollToBottom();
         }
     });
@@ -822,11 +841,15 @@ function addMessageToUI(role, content) {
     } else {
         const header = document.createElement('div');
         header.className = 'block-header';
-        header.textContent = role === 'user' ? 'Summarized Question' : 'Answer';
+        header.textContent = role === 'user' ? 'Summarized Question' : '✨ GHOST AI';
         
         const body = document.createElement('div');
         body.className = 'block-body';
-        body.textContent = content;
+        if (role === 'ai' || role === 'assistant') {
+            body.innerHTML = parseMarkdown(content);
+        } else {
+            body.textContent = content;
+        }
 
         block.appendChild(header);
         block.appendChild(body);
@@ -959,7 +982,7 @@ THE INTERVIEWER IS TALKING TO ME NOW:`;
 }
 
 function updateGhostStatus(isGhost) {
-    const ghostStatus = document.getElementById('ghostStatus');
+    const ghostStatus = document.getElementById('ghostStatus'); // legacy
     const focusCounter = document.getElementById('focusCounter');
 
     if (ghostStatus) {
@@ -980,27 +1003,53 @@ function updateGhostStatus(isGhost) {
             }
         }
     }
+
+    if (statusDot && ghostStatusText && !isMeetingMode) {
+        statusDot.className = 'status-dot online';
+        ghostStatusText.textContent = 'Ready';
+    }
 }
 
 function setLoading(isLoading) {
     sendButton.disabled = isLoading;
-    // SMART INPUT FIX: 
-    // Only disable input if we actually have focus (active usage). 
-    // If we are in stealth mode (passive click), disabling input triggers a blur/focus-shift 
-    // that can activate the window or flash the taskbar.
     if (document.hasFocus()) {
         messageInput.disabled = isLoading;
     }
+    
+    // Ghost AI UI Updates
+    if (statusDot && ghostStatusText) {
+        if (isLoading) {
+            statusDot.className = 'status-dot online'; // Can pulse if wanted
+            ghostStatusText.textContent = 'Thinking...';
+        } else {
+            if (isMeetingMode) {
+                statusDot.className = 'status-dot listening';
+                ghostStatusText.textContent = 'Listening...';
+            } else {
+                statusDot.className = 'status-dot online';
+                ghostStatusText.textContent = 'Ready';
+            }
+        }
+    }
+
     if (isLoading) {
+        // Find existing empty-state and show typing there OR create new block
+        const emptyState = document.querySelector('.empty-state');
+        if (emptyState) emptyState.style.display = 'none';
+
         const typingDiv = document.createElement('div');
         typingDiv.id = 'typingIndicator';
         typingDiv.className = 'message ai';
-        typingDiv.innerHTML = '<div class="content-block"><div class="block-header">PROCESSING</div><div class="block-body">AI is thinking...</div></div>';
+        typingDiv.innerHTML = '<div class="content-block"><div class="block-header">✨ GHOST AI</div><div class="block-body"><span class="typing-indicator" style="display:inline-block;"><span></span><span></span><span></span></span></div></div>';
         messagesList.appendChild(typingDiv);
         scrollToBottom();
     } else {
         const indicator = document.getElementById('typingIndicator');
         if (indicator) indicator.remove();
+        
+        // Return empty state if chat is still empty
+        const emptyState = document.querySelector('.empty-state');
+        if (emptyState && chatHistory.length === 0) emptyState.style.display = 'flex';
     }
 }
 
@@ -1040,7 +1089,25 @@ async function toggleMeetingMode() {
     
     if (listenBtn) {
         listenBtn.classList.toggle('active', isMeetingMode);
-        listenBtn.textContent = isMeetingMode ? '🛑 Stop Listen' : '🎙️ Listen';
+        listenBtn.querySelector('.fab-label').textContent = isMeetingMode ? 'Stop Listen' : 'Listen';
+    }
+    
+    if (waveform) {
+        if (isMeetingMode) {
+            waveform.classList.remove('hidden');
+        } else {
+            waveform.classList.add('hidden');
+        }
+    }
+    
+    if (statusDot && ghostStatusText) {
+        if (isMeetingMode) {
+            statusDot.className = 'status-dot listening';
+            ghostStatusText.textContent = 'Listening...';
+        } else {
+            statusDot.className = 'status-dot online';
+            ghostStatusText.textContent = 'Ready';
+        }
     }
     
     if (listeningIndicator) {

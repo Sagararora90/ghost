@@ -7,163 +7,251 @@
     <meta http-equiv="Content-Security-Policy" content="default-src 'self' https://api.groq.com https://api-inference.huggingface.co https://router.huggingface.co https://generativelanguage.googleapis.com; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' 'unsafe-eval'">
     <title>Ghost AI</title>
     <link rel="stylesheet" href="styles.css">
+    <!-- Google Fonts for modern typography -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 </head>
 <body>
-    <div class="app-container">
-        <!-- Top Control Bar -->
-        <header class="top-bar">
-            <div class="brand-section">
-                <div class="status-dot online"></div>
-                <span class="brand-name">Ghost AI</span>
-                <span id="ghostStatus" class="ghost-badge">👻</span>
-                <span id="focusCounter" class="focus-badge">0</span>
-            </div>
-            
-            <div class="window-controls">
-                <div id="listeningIndicator" class="listening-badge hidden">
-                    <span class="pulse-dot"></span> <span id="timerDisplay">00:00</span>
+    <div class="ghost-app">
+        <!-- HEADER -->
+        <header class="ghost-header">
+            <div class="header-left">
+                <!-- Using generic ghost icon if local logo is not available in assets, though we can use a CSS mask or pure emoji -->
+                <div class="ghost-logo-container">
+                    <span class="ghost-icon">👻</span>
+                    <!-- You can replace the emoji with the generated image by pointing src to the image file once moved to assets -->
                 </div>
-                <button id="stopListeningBtn" class="control-btn danger hidden">Stop</button>
-                <button id="hideBtn" class="control-btn">Hide</button>
-                <button id="exitBtn" class="control-btn danger-icon">✕</button>
+                <h1 class="app-name">GHOST</h1>
+                <div class="status-indicator">
+                    <span class="status-dot"></span>
+                    <span id="ghostStatusText" class="status-text">Ready</span>
+                </div>
+            </div>
+            <div class="header-right">
+                <button id="settingsBtn" class="icon-btn" title="Settings">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                </button>
+                <div class="window-controls">
+                    <button id="hideBtn" class="control-btn" title="Minimize">_</button>
+                    <button id="exitBtn" class="control-btn exit" title="Close">✕</button>
+                </div>
             </div>
         </header>
 
-        <!-- Action Bar -->
-        <div class="action-bar">
-            <div class="action-buttons">
-                <button id="analyseScreenBtn" class="action-pill primary">📷 Analyse Screen</button>
-                <button id="listenBtn" class="action-pill secondary">🎙️ Listen</button>
-                <button id="answerQuestionBtn" class="action-pill secondary">💬 Answer</button>
-                <button id="settingsBtn" class="action-pill subtle">⚙️</button>
-            </div>
-        </div>
+        <!-- MODE SELECTOR TABS -->
+        <nav class="mode-tabs">
+            <button class="mode-tab active" data-mode="interview">Interview</button>
+            <button class="mode-tab" data-mode="coding">Coding</button>
+            <button class="mode-tab" data-mode="hr">HR</button>
+            <button class="mode-tab" data-mode="system">System Design</button>
+        </nav>
 
-        <!-- Main Content Area (Scrollable) -->
-        <main id="chatContainer" class="content-area">
-            <div id="messages" class="messages-list">
-                <div class="message system startup">
-                    <div class="content-block">
-                        <div class="block-body">System Ready. Invisible Mode Active.</div>
+        <!-- MAIN CONTENT AREA -->
+        <main class="ghost-main">
+            <!-- Live Question Detection Panel -->
+            <section class="live-panel">
+                <div class="listening-area">
+                    <div id="waveform" class="waveform hidden">
+                        <div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div>
+                    </div>
+                    <!-- Reuse the messageInput so we don't break renderer logic -->
+                    <textarea id="messageInput" class="live-transcription" placeholder="Awaiting audio or text input..." rows="2"></textarea>
+                </div>
+                <div class="live-actions">
+                    <button id="sendButton" class="ghost-btn primary">Analyze &gt;</button>
+                </div>
+            </section>
+
+            <!-- AI Suggested Answer Card -->
+            <section class="ai-card" id="chatContainer">
+                <div class="card-header">
+                    <span class="card-title">✨ AI Analysis</span>
+                    <div class="card-actions">
+                        <button id="copyAnswerBtn" class="icon-btn copy-btn" title="Copy to Clipboard">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                        </button>
+                        <button id="toggleExpandBtn" class="icon-btn" title="Expand / Concise">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>
+                        </button>
                     </div>
                 </div>
-            </div>
+                <!-- Messages will be injected here by renderer.js -->
+                <div id="messages" class="messages-container">
+                    <div class="message system startup hidden">
+                        <!-- Left hidden as it's legacy -->
+                    </div>
+                    <!-- Placeholder UI while waiting -->
+                    <div class="empty-state">
+                        <span class="typing-indicator hidden">
+                            <span></span><span></span><span></span>
+                        </span>
+                        <p class="empty-text">Listening for context...</p>
+                    </div>
+                </div>
+            </section>
         </main>
 
-        <!-- Input Area -->
-        <div class="input-area">
-            <textarea id="messageInput" placeholder="Type or paste question..." rows="1"></textarea>
-            <button id="sendButton" class="send-btn">➤</button>
+        <!-- FLOATING CONTROLS (Bottom Action Bar) -->
+        <div class="floating-controls">
+            <button id="listenBtn" class="action-fab primary">
+                <span class="fab-icon">🎙️</span>
+                <span class="fab-label">Listen</span>
+            </button>
+            <button id="stopListeningBtn" class="action-fab danger hidden">
+                <span class="fab-icon">🛑</span>
+                <span class="fab-label">Stop</span>
+            </button>
+            <button id="analyseScreenBtn" class="action-fab secondary">
+                <span class="fab-icon">📷</span>
+                <span class="fab-label">Screen</span>
+            </button>
+            <button id="answerQuestionBtn" class="action-fab subtle hidden">
+                <span class="fab-icon">💬</span>
+                <span class="fab-label">Answer</span>
+            </button>
         </div>
 
+        <!-- HIDDEN OVERLAYS FOR COMPATIBILITY WITH renderer.js -->
         <!-- OCR Overlay -->
-        <div id="ocrOverlay" class="overlay hidden">
-            <div class="overlay-content">
+        <div id="ocrOverlay" class="ghost-overlay hidden">
+            <div class="overlay-panel">
                 <h3>Select Text to Analyze</h3>
                 <div id="ocrLines" class="ocr-list"></div>
                 <div class="overlay-actions">
-                    <button id="cancelOcr" class="btn text-btn">Cancel</button>
-                    <button id="sendOcr" class="btn primary-btn" disabled>Analyze Selection</button>
+                    <button id="cancelOcr" class="ghost-btn text-btn">Cancel</button>
+                    <button id="sendOcr" class="ghost-btn primary" disabled>Analyze Selection</button>
                 </div>
             </div>
         </div>
 
-        <!-- Settings Modal -->
-        <div id="settingsModal" class="overlay hidden">
-            <div class="modal-box settings-modal">
-                <div class="modal-header">
-                    <h2>⚙️ Settings</h2>
-                    <button id="closeSettings" class="close-icon">&times;</button>
+        <!-- Settings Modal (Redesigned) -->
+        <div id="settingsModal" class="ghost-overlay hidden">
+            <div class="overlay-panel settings-panel">
+                <div class="panel-header">
+                    <h2>⚙️ System Configuration</h2>
+                    <button id="closeSettings" class="close-icon">✕</button>
                 </div>
-                <div class="modal-body">
-                    <!-- API Keys -->
+                <div class="panel-body">
                     <div class="setting-group">
-                        <label>API Keys <span class="hint">(one per line: Groq/HF/Gemini)</span></label>
-                        <textarea id="groqKeyInput" class="code-input" rows="3" placeholder="gsk_...&#10;hf_...&#10;AIza..."></textarea>
+                        <label>AI Keys <span class="hint">(Groq/HF/Gemini)</span></label>
+                        <textarea id="groqKeyInput" class="glow-input" rows="3" placeholder="gsk_...&#10;hf_...&#10;AIza..."></textarea>
                     </div>
-
-                    <!-- Resume / Bio -->
                     <div class="setting-group">
-                        <label>Resume / Bio</label>
-                        <div class="file-upload-row">
-                            <button id="uploadResumeBtn" class="btn sm-btn">📄 Upload</button>
+                        <label>Core Protocol (Resume)</label>
+                        <div class="file-action-row">
+                            <button id="uploadResumeBtn" class="ghost-btn outline">📄 Upload</button>
                             <span id="uploadStatus" class="status-label hidden"></span>
                         </div>
                         <div id="resumeFileList" class="file-list"></div>
-                        <textarea id="userBioInput" rows="2" placeholder="Or paste resume text..."></textarea>
+                        <textarea id="userBioInput" class="glow-input" rows="2" placeholder="Paste data..."></textarea>
                     </div>
-
-                    <!-- Job Description -->
                     <div class="setting-group">
-                        <label>Job Description</label>
-                        <div class="file-upload-row">
-                            <button id="uploadJdBtn" class="btn sm-btn">📄 Upload JD</button>
+                        <label>Target Parameters (JD)</label>
+                        <div class="file-action-row">
+                            <button id="uploadJdBtn" class="ghost-btn outline">📄 Upload JD</button>
                             <span id="jdUploadStatus" class="status-label hidden"></span>
                         </div>
                         <div id="jdFileList" class="file-list"></div>
-                        <textarea id="userJdInput" rows="2" placeholder="Target role JD..."></textarea>
+                        <textarea id="userJdInput" class="glow-input" rows="2" placeholder="Paste JD..."></textarea>
                     </div>
-
-                    <!-- Projects -->
                     <div class="setting-group">
-                        <label>Project Code</label>
-                        <div class="file-upload-row">
-                            <button id="uploadProjectBtn" class="btn sm-btn">📦 ZIP</button>
-                            <button id="uploadProjectFolderBtn" class="btn sm-btn">📁 Folder</button>
+                        <label>Codebase Directives</label>
+                        <div class="file-action-row">
+                            <button id="uploadProjectBtn" class="ghost-btn outline">📦 ZIP</button>
+                            <button id="uploadProjectFolderBtn" class="ghost-btn outline">📁 Folder</button>
                             <span id="projectUploadStatus" class="status-label hidden"></span>
                         </div>
                         <div id="projectFileList" class="file-list"></div>
-                        <textarea id="userProjectsInput" rows="2" placeholder="Or paste project code..."></textarea>
+                        <textarea id="userProjectsInput" class="glow-input" rows="2" placeholder="Paste code..."></textarea>
                     </div>
-
-                    <!-- Footer -->
-                    <div class="modal-footer">
-                        <div class="footer-left">
-                            <button id="wipeAllData" class="btn danger-btn">🗑️ Reset All</button>
-                            <button id="resetFocusBtn" class="btn text-btn">Reset Focus Counter</button>
-                            <button id="checkForUpdatesBtn" class="btn text-btn">Check Updates</button>
+                    <div class="panel-footer">
+                        <div class="footer-cluster">
+                            <button id="wipeAllData" class="ghost-btn danger">Purge</button>
+                            <button id="resetFocusBtn" class="ghost-btn outline">Reset Focus</button>
+                            <button id="checkForUpdatesBtn" class="ghost-btn outline">Update</button>
                         </div>
-                        <button id="saveSettings" class="btn primary-btn">Save</button>
+                        <button id="saveSettings" class="ghost-btn primary">Sync</button>
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- Auth Overlay (Login/Signup Gate) -->
-        <div id="authOverlay" class="overlay hidden">
-            <div class="overlay-content auth-box">
-                <div class="auth-header">
-                    <span class="auth-icon">👻</span>
-                    <h3 id="authTitle">Login</h3>
+        <!-- Auth Overlay -->
+        <div id="authOverlay" class="ghost-overlay hidden">
+            <div class="overlay-panel auth-panel">
+                <div class="auth-brand">
+                    <span class="ghost-icon large">👻</span>
+                    <h3 id="authTitle" class="neon-text">GHOST PROTOCOL</h3>
                 </div>
                 <div class="auth-form">
-                    <input type="text" id="authUsername" class="auth-input" placeholder="Username" autocomplete="off" spellcheck="false">
-                    <input type="password" id="authPassword" class="auth-input" placeholder="Password" autocomplete="off">
-                    <textarea id="authKeyInput" class="auth-input hidden" rows="2" placeholder="API Keys (Groq/HF/Gemini) - one per line"></textarea>
+                    <input type="text" id="authUsername" class="glow-input" placeholder="ID.Name" autocomplete="off" spellcheck="false">
+                    <input type="password" id="authPassword" class="glow-input" placeholder="Passkey" autocomplete="off">
+                    <textarea id="authKeyInput" class="glow-input hidden" rows="2" placeholder="API Keys (Groq/HF/Gemini)"></textarea>
                     <div id="authError" class="auth-error hidden"></div>
-                    <button id="authSubmit" class="btn primary-btn auth-submit-btn">Login</button>
+                    <button id="authSubmit" class="ghost-btn primary w-full">Initialize</button>
                     <div class="auth-toggle">
-                        <span id="authToggleText">Don't have an account?</span>
-                        <button id="authToggleBtn" class="btn-link">Create Account</button>
+                        <span id="authToggleText">Unauthorized?</span>
+                        <button id="authToggleBtn" class="link-btn">Request Access</button>
                     </div>
                 </div>
             </div>
         </div>
 
         <!-- Onboarding Overlay -->
-        <div id="onboardingOverlay" class="overlay hidden">
-            <div class="overlay-content onboarding-box">
-                <h3>Welcome to Ghost AI 👻</h3>
-                <p class="onboard-text">Enter your API key to get started.</p>
-                <input type="text" id="onboardingKeyInput" class="code-input" placeholder="gsk_... or hf_... or AIza...">
-                <button id="finishOnboarding" class="btn primary-btn" style="width:100%;margin-top:12px;">Start Ghost Mode</button>
+        <div id="onboardingOverlay" class="ghost-overlay hidden">
+            <div class="overlay-panel auth-panel">
+                <h3 class="neon-text">SYSTEM ONLINE</h3>
+                <p class="onboard-text">Provide neural link API key to proceed.</p>
+                <input type="text" id="onboardingKeyInput" class="glow-input" placeholder="Valid API Key required...">
+                <button id="finishOnboarding" class="ghost-btn primary w-full mt-4">Engage</button>
             </div>
         </div>
+
     </div>
 
-    <!-- Toast Notifications -->
-    <div id="toastContainer"></div>
+    <!-- Hidden elements kept for renderer compatibility -->
+    <div style="display:none;">
+        <span id="focusCounter">0</span>
+        <div id="listeningIndicator"><span id="timerDisplay">00:00</span></div>
+    </div>
+
+    <div id="toastContainer" class="ghost-toasts"></div>
 
     <script src="renderer.js"></script>
+    <script>
+        // Inline UI logic for tabs, expand, etc.
+        document.addEventListener('DOMContentLoaded', () => {
+            // Mode Tabs
+            const tabs = document.querySelectorAll('.mode-tab');
+            tabs.forEach(tab => {
+                tab.addEventListener('click', () => {
+                    tabs.forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+                    // Add logic to prepend standard mode context when "analyze" is clicked or modifying prompt implicitly
+                });
+            });
+
+            // Toggle Expand AI Card
+            const toggleBtn = document.getElementById('toggleExpandBtn');
+            const aiCard = document.querySelector('.ai-card');
+            if(toggleBtn && aiCard) {
+                toggleBtn.addEventListener('click', () => {
+                    aiCard.classList.toggle('expanded');
+                });
+            }
+
+            // Copy Action
+            const copyBtn = document.getElementById('copyAnswerBtn');
+            if(copyBtn) {
+                copyBtn.addEventListener('click', () => {
+                    const messages = document.getElementById('messages');
+                    const text = messages.innerText;
+                    navigator.clipboard.writeText(text);
+                    // Show a quick visual feedback
+                    copyBtn.classList.add('success');
+                    setTimeout(() => copyBtn.classList.remove('success'), 1000);
+                });
+            }
+        });
+    </script>
 </body>
 </html>

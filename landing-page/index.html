@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Ghost | The Stealth AI Interview Partner</title>
     <link rel="stylesheet" href="style.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
     <meta name="description" content="The world's first invisible AI assistant for technical interviews. Undetectable by proctoring software.">
@@ -16,144 +16,159 @@
     <link rel="icon" type="image/png" href="icon.png">
 </head>
 <body>
-    <div class="noise-overlay"></div>
-    <div class="bg-glow"></div>
+    <!-- Background Effects -->
+    <div class="glow-orb top-right"></div>
+    <div class="glow-orb bottom-left"></div>
+    <div class="grid-background"></div>
 
     <div class="container">
+        <!-- Modern Header -->
         <header>
             <div class="logo">
-                <i class="fas fa-ghost"></i> GHOST
+                <i class="fas fa-ghost logo-icon"></i> <span class="logo-text">GHOST</span>
             </div>
             <nav>
-                <a href="#bento" class="btn btn-secondary">View Features</a>
+                <a href="#features" class="nav-link">Features</a>
+                <a href="#stealth" class="nav-link">Stealth Mode</a>
+                <a href="https://github.com/Sagararora90/ghost/releases/download/V1.0.32/Ghost_Portable.zip" class="btn btn-primary nav-btn" download>Download</a>
             </nav>
         </header>
 
+        <!-- Hero Section -->
         <section class="hero">
-            <h1>Crush Technical Interviews <br>with <span class="gradient-text">Total Stealth.</span></h1>
-            <p>The world's first AI assistant that is completely invisible to screen sharing and proctoring software. Your secret partner in every call.</p>
+            <div class="hero-badge">
+                <span class="badge-dot"></span>
+                v1.0.32 is now live
+            </div>
+            
+            <h1 class="hero-title">
+                The Interview <span class="gradient-text">Unfair Advantage</span>
+            </h1>
+            
+            <p class="hero-subtitle">
+                An undetectable, universally compatible desktop AI assistant. It sees your screen, hears your meeting, and whispers the answers to you.
+            </p>
+
             <div class="cta-group">
-                <a href="https://github.com/Sagararora90/ghost/releases/download/V1.0.32/Ghost_Portable.zip" class="btn btn-primary" download>
+                <a href="https://github.com/Sagararora90/ghost/releases/download/V1.0.32/Ghost_Portable.zip" class="btn btn-primary btn-large glow-btn" download>
                     <i class="fab fa-windows"></i> Download for Windows
                 </a>
-                <button class="btn btn-secondary btn-icon" title="Copy Download Link" id="copyBtn">
+                <button class="btn btn-secondary btn-large btn-icon" id="copyBtn" title="Copy Link">
                     <i class="fas fa-link"></i>
                 </button>
             </div>
-            <p style="margin-top: 1.5rem; font-size: 0.9rem; color: var(--text-secondary);">
-                Current Version: 1.0.32 <span class="tag">STABLE</span>
-            </p>
-        </section>
 
-        <!-- Bento Grid Section -->
-        <section class="bento-grid" id="bento">
-            <!-- Large Focus Card -->
-            <div class="bento-card span-md-2 span-lg-2 highlight-card">
-                <div class="card-content">
-                    <div class="icon-box"><i class="fas fa-eye-slash"></i></div>
-                    <h3>Invisible Overlay</h3>
-                    <p>Ghost sits on top of your screen but remains invisible to screen sharing tools like Zoom, Teams, and Google Meet. Only you can see the AI's guidance.</p>
+            <!-- Floating App Mockup -->
+            <div class="app-mockup glass-panel slide-up">
+                <div class="mockup-header">
+                    <div class="mockup-controls">
+                        <span></span><span></span><span></span>
+                    </div>
+                    <div class="mockup-title">✨ GHOST AI</div>
                 </div>
-                <div class="card-visual overlay-visual"></div>
-            </div>
-
-            <!-- Standard Card -->
-            <div class="bento-card">
-                <div class="card-content">
-                    <div class="icon-box"><i class="fas fa-shield-alt"></i></div>
-                    <h3>Anti-Proctor</h3>
-                    <p>Triple-layer focus guard prevents proctoring software from detecting focus loss or background processes.</p>
-                </div>
-            </div>
-
-            <!-- Standard Card -->
-            <div class="bento-card">
-                <div class="card-content">
-                    <div class="icon-box"><i class="fas fa-bolt"></i></div>
-                    <h3>Instant OCR</h3>
-                    <p>Capture coding problems instantly with a global hotkey. The AI reads the screen in milliseconds.</p>
-                </div>
-            </div>
-
-            <!-- Tall Card -->
-            <div class="bento-card span-row-2">
-                <div class="card-content">
-                    <div class="icon-box"><i class="fas fa-robot"></i></div>
-                    <h3>Context Aware</h3>
-                    <p>Upload your resume and the job description. Ghost roleplays as **YOU**, tailoring answers to your actual experience.</p>
-                    <div class="code-preview">
-                        <span class="comment">// AI Response</span>
-                        <span class="keyword">const</span> <span class="var">answer</span> = <span class="string">"Based on my experience..."</span>;
+                <div class="mockup-body">
+                    <div class="mockup-message user">
+                        Explain inversion of control in simple terms.
+                    </div>
+                    <div class="mockup-message ai">
+                        <strong>Inversion of Control (IoC):</strong><br>
+                        Instead of your code calling a library, a framework calls your code. You hand over the "control" of the flow to the framework.<br><br>
+                        <em>Example:</em> React calls your components when the state changes.
                     </div>
                 </div>
             </div>
+        </section>
 
-             <!-- Wide Card -->
-             <div class="bento-card span-md-2">
-                <div class="card-content">
-                    <div class="icon-box"><i class="fas fa-microphone-lines"></i></div>
-                    <h3>Audio Transcription</h3>
-                    <p>Real-time speech-to-text ensures you never miss a detail. The AI listens to the interviewer and suggests answers live.</p>
+        <!-- Bento Grid Features Section -->
+        <section class="features" id="features">
+            <h2 class="section-title">Designed for <span class="gradient-text">Complete Stealth</span></h2>
+            
+            <div class="bento-grid">
+                <!-- Large Feature: Screen capture -->
+                <div class="bento-card span-2 highlight-card">
+                    <div class="card-glow"></div>
+                    <div class="icon-wrapper"><i class="fas fa-eye-slash"></i></div>
+                    <h3>Absolute Invisibility</h3>
+                    <p>The UI is composed entirely as a transparent overlay using advanced Windows APIs (WDA_EXCLUDEFROMCAPTURE). Screensharing tools like Zoom, Teams, and Google Meet literally cannot see it.</p>
                 </div>
-            </div>
 
-            <!-- Standard Card -->
-            <div class="bento-card">
-                <div class="card-content">
-                    <div class="icon-box"><i class="fas fa-key"></i></div>
-                    <h3>Key Rotation</h3>
-                    <p>Smart API key management prevents rate limits during critical interview moments.</p>
+                <!-- Regular Feature: Audio -->
+                <div class="bento-card">
+                    <div class="icon-wrapper"><i class="fas fa-microphone-lines"></i></div>
+                    <h3>Live Audio Transcription</h3>
+                    <p>Ghost taps into your system audio loopback to transcribe the interviewer's words in real-time. Just listen and read.</p>
+                </div>
+
+                <!-- Regular Feature: Global Hotkeys -->
+                <div class="bento-card">
+                    <div class="icon-wrapper"><i class="fas fa-bolt"></i></div>
+                    <h3>Global Hotkeys</h3>
+                    <p>Control the AI without clicking away. Use `Ctrl+Shift+L` to capture the screen or `Up/Down` arrows to toggle the UI visibility instantly.</p>
+                </div>
+
+                <!-- Code Generation -->
+                <div class="bento-card span-2 code-card">
+                    <div class="icon-wrapper"><i class="fas fa-code"></i></div>
+                    <h3>Context-Aware Intelligence</h3>
+                    <p>Ghost parses your uploaded resume and job description to answer questions as if it were you.</p>
+                    <pre class="code-preview"><code><span class="comment">// The AI speaks in your voice</span>
+<span class="keyword">function</span> <span class="method">generateResponse</span>(context) {
+    <span class="keyword">return</span> <span class="string">"Based on my 3 years of experience..."</span>;
+}</code></pre>
                 </div>
             </div>
         </section>
 
-        <section class="shortcuts">
-            <h2 style="text-align: center; margin-bottom: 2rem; font-size: clamp(2rem, 4vw, 3rem);">Silent Controls</h2>
-            <div class="shortcut-list">
-                <div class="shortcut-row">
-                    <span>Toggle Visibility</span>
-                    <div class="keys"><span class="kdb">↑</span><span class="kdb">↓</span></div>
-                </div>
-                <div class="shortcut-row">
-                    <span>Quick Capture</span>
-                    <div class="keys"><span class="kdb">←</span><span class="kdb">→</span></div>
-                </div>
-                <div class="shortcut-row">
-                    <span>Emergency Quit</span>
-                    <div class="keys"><span class="kdb">Ctrl</span><span class="kdb">Shift</span><span class="kdb">Q</span></div>
-                </div>
-            </div>
-        </section>
-
+        <!-- Footer -->
         <footer>
-            <p>&copy; 2026 Ghost AI. Built for the modern technical candidate.</p>
+            <div class="footer-content">
+                <div class="logo">
+                    <i class="fas fa-ghost logo-icon"></i> <span class="logo-text">GHOST</span>
+                </div>
+                <p class="crypto-tag">Stay stealthy.</p>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2026 Ghost AI. Built for the modern technical candidate.</p>
+            </div>
         </footer>
     </div>
 
     <script>
+        // Copy Link Functionality
         document.getElementById('copyBtn').addEventListener('click', function() {
             const url = "https://github.com/Sagararora90/ghost/releases/download/V1.0.32/Ghost_Portable.zip";
             navigator.clipboard.writeText(url).then(() => {
                 const icon = this.querySelector('i');
+                const originalClass = icon.className;
                 icon.className = 'fas fa-check';
-                this.classList.add('success');
+                this.classList.add('success-state');
+                
                 setTimeout(() => {
-                    icon.className = 'fas fa-link';
-                    this.classList.remove('success');
+                    icon.className = originalClass;
+                    this.classList.remove('success-state');
                 }, 2000);
             });
         });
 
-        // Simple Scroll Reveal
+        // Intersection Observer for Animations
+        const observerOptions = {
+            threshold: 0.1,
+            rootMargin: "0px 0px -50px 0px"
+        };
+
         const observer = new IntersectionObserver((entries) => {
             entries.forEach(entry => {
                 if (entry.isIntersecting) {
-                    entry.target.classList.add('visible');
+                    entry.target.classList.add('fade-in-up');
+                    observer.unobserve(entry.target);
                 }
             });
-        }, { threshold: 0.1 });
+        }, observerOptions);
 
-        document.querySelectorAll('.bento-card, .shortcut-row').forEach(el => observer.observe(el));
+        document.querySelectorAll('.bento-card, .section-title, .hero-title, .hero-subtitle, .cta-group').forEach(el => {
+            el.classList.add('hidden-state');
+            observer.observe(el);
+        });
     </script>
 </body>
 </html>
